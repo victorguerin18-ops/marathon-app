@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { stravaLogin, exchangeToken, fetchActivities } from './strava';
 
 /* ─── STORAGE ─── */
 const STORE = {
@@ -65,7 +66,6 @@ function isToday(d) { return d === TODAY.toISOString().slice(0,10); }
 function isFuture(d) { return new Date(d) > TODAY; }
 function isPast(d) { return new Date(d) < TODAY; }
 
-/* ─── SCORE COMPARISON ─── */
 function scoreSession(planned, done) {
   if (!planned || !done) return null;
   const distScore = Math.max(0, 100 - Math.abs(done.dist - planned.targetDist) / planned.targetDist * 100);
@@ -76,22 +76,57 @@ function scoreSession(planned, done) {
   return Math.round((distScore * 0.4 + durScore * 0.3 + hrScore * 0.3));
 }
 
-/* ─── MAIN APP ─── */
 export default function App() {
   const [planned, setPlanned] = useState(() => STORE.get("planned", SEED_PLANNED));
   const [done,    setDone]    = useState(() => STORE.get("done",    SEED_DONE));
   const [view,    setView]    = useState("today");
-  const [modal,   setModal]   = useState(null); // { type: "plan"|"log"|"compare", data }
+  const [modal,   setModal]   = useState(null);
+  const [stravaConnected, setStravaConnected] = useState(() => !!STORE.get("strava_token", null));
+  const [stravaLoading, setStravaLoading] = useState(false);
 
   useEffect(() => { STORE.set("planned", planned); }, [planned]);
   useEffect(() => { STORE.set("done", done); }, [done]);
 
-  /* derived */
+  // Handle Strava OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code) {
+      setStravaLoading(true);
+      exchangeToken(code).then(data => {
+        STORE.set("strava_token", data.access_token);
+        setStravaConnected(true);
+        fetchActivities(data.access_token).then(activities => {
+          setDone(prev => {
+            const ids = new Set(prev.map(r => r.id));
+            const newOnes = activities.filter(a => !ids.has(a.id));
+            return [...prev, ...newOnes];
+          });
+          setStravaLoading(false);
+        });
+        window.history.replaceState({}, '', '/');
+      }).catch(() => setStravaLoading(false));
+    }
+  }, []);
+
+  // Sync Strava if already connected
+  function syncStrava() {
+    const token = STORE.get("strava_token", null);
+    if (!token) return;
+    setStravaLoading(true);
+    fetchActivities(token).then(activities => {
+      setDone(prev => {
+        const ids = new Set(prev.map(r => r.id));
+        const newOnes = activities.filter(a => !ids.has(a.id));
+        return [...prev, ...newOnes];
+      });
+      setStravaLoading(false);
+    }).catch(() => setStravaLoading(false));
+  }
+
   const todayStr = TODAY.toISOString().slice(0,10);
   const todayPlanned = planned.filter(p => p.date === todayStr);
-  const todayDone    = done.filter(d => d.date === todayStr);
   const upcoming     = planned.filter(p => isFuture(p.date)).sort((a,b) => a.date.localeCompare(b.date));
-  const recentDone   = [...done].sort((a,b) => b.date.localeCompare(a.date));
 
   const weeklyVol = useMemo(() => {
     const weeks = {};
@@ -126,7 +161,6 @@ export default function App() {
       .map(r => ({ date: r.date, pace: (r.dur * 60) / r.dist }));
   }, [done]);
 
-  /* ─── FORMS STATE ─── */
   const [planForm, setPlanForm] = useState({ date: todayStr, type:"Endurance", targetDist:"", targetDur:"", targetHR:"", notes:"" });
   const [logForm,  setLogForm]  = useState({ date:todayStr, plannedId:"", type:"Endurance", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
 
@@ -150,7 +184,12 @@ export default function App() {
     setModal(null);
   }
 
-  /* ─── STYLES ─── */
+  const acwrStatus = acwr > 1.3 ? { label:"RISQUE ÉLEVÉ", color:"#FF6B6B" }
+    : acwr > 1.15 ? { label:"CHARGE MODÉRÉE", color:"#FF9F43" }
+    : { label:"OPTIMAL", color:"#4ECDC4" };
+
+  const varietyScore = Object.keys(typeVariety).length;
+
   const css = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
     *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
@@ -174,18 +213,10 @@ export default function App() {
     .pill { display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-family:'JetBrains Mono',monospace; }
     .score-ring { transition:stroke-dashoffset 1s ease; }
     select option { background:#0F1117; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; display:inline-block; }
   `;
 
-  const acwrStatus = acwr > 1.3 ? { label:"RISQUE ÉLEVÉ", color:"#FF6B6B" }
-    : acwr > 1.15 ? { label:"CHARGE MODÉRÉE", color:"#FF9F43" }
-    : { label:"OPTIMAL", color:"#4ECDC4" };
-
-  const varietyScore = Object.keys(typeVariety).length;
-  const varietyStatus = varietyScore >= 4 ? { label:"EXCELLENTE", color:"#4ECDC4" }
-    : varietyScore >= 3 ? { label:"BONNE", color:"#FFE66D" }
-    : { label:"À AMÉLIORER", color:"#FF6B6B" };
-
-  /* ─── RENDER ─── */
   return (
     <div style={{ minHeight:"100vh", background:"#080A0E", fontFamily:"'Syne',sans-serif", color:"#E8E4DC", maxWidth:480, margin:"0 auto", paddingBottom:80 }}>
       <style>{css}</style>
@@ -214,6 +245,36 @@ export default function App() {
         </div>
       </div>
 
+      {/* STRAVA BANNER */}
+      <div style={{ padding:"12px 20px 0" }}>
+        {!stravaConnected ? (
+          <button onClick={stravaLogin} style={{
+            width:"100%", background:"#FC4C02", border:"none", borderRadius:10,
+            padding:"12px", color:"#fff", fontSize:13, fontWeight:700,
+            fontFamily:"'JetBrains Mono',monospace", cursor:"pointer", display:"flex",
+            alignItems:"center", justifyContent:"center", gap:8,
+          }}>
+            🔗 CONNECTER STRAVA — importer mes séances
+          </button>
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0F1117", border:"1px solid #1C1F27", borderRadius:10, padding:"10px 14px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:"#FC4C02" }} />
+              <span style={{ fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace" }}>STRAVA CONNECTÉ · {done.filter(d=>d.fromStrava).length} séances importées</span>
+            </div>
+            <button onClick={syncStrava} className="btn-ghost" style={{ borderRadius:8, padding:"4px 10px", fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>
+              {stravaLoading ? <span className="spin">↻</span> : "↻ SYNC"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {stravaLoading && (
+        <div style={{ padding:"10px 20px 0", textAlign:"center", fontSize:11, color:"#FC4C02", fontFamily:"'JetBrains Mono',monospace" }}>
+          <span className="spin">↻</span> Import des séances Strava en cours...
+        </div>
+      )}
+
       {/* NAV */}
       <div style={{ display:"flex", gap:4, padding:"16px 20px 0" }}>
         {[["today","AUJOURD'HUI"],["plan","PLAN"],["analyse","ANALYSE"],["journal","JOURNAL"]].map(([v,l]) => (
@@ -230,8 +291,7 @@ export default function App() {
         {/* ─── TODAY ─── */}
         {view === "today" && (
           <div className="fade-up">
-            {/* Today's sessions */}
-            {todayPlanned.length === 0 && todayDone.length === 0 && (
+            {todayPlanned.length === 0 && (
               <div className="card" style={{ padding:28, textAlign:"center" }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>🏃</div>
                 <div style={{ fontSize:14, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>Rien de planifié aujourd'hui</div>
@@ -277,7 +337,7 @@ export default function App() {
                       </button>
                     : <div>
                         <div style={{ display:"flex", gap:12, marginBottom:10 }}>
-                          {[["DIST",`${linked.dist} km`,p.targetDist===linked.dist],["DURÉE",`${linked.dur} min`,null],["ALLURE",pace(linked.dist,linked.dur),null]].map(([lbl,val]) => (
+                          {[["DIST",`${linked.dist} km`],["DURÉE",`${linked.dur} min`],["ALLURE",pace(linked.dist,linked.dur)]].map(([lbl,val]) => (
                             <div key={lbl} style={{ flex:1, background:"#080A0E", borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
                               <div style={{ fontSize:9, color:"#555", fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>{lbl}</div>
                               <div style={{ fontSize:15, fontWeight:700 }}>{val}</div>
@@ -291,15 +351,13 @@ export default function App() {
               );
             })}
 
-            {/* Next upcoming */}
             {upcoming.slice(0,3).length > 0 && (
               <div style={{ marginTop:8 }}>
                 <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>PROCHAINES SÉANCES</div>
                 {upcoming.slice(0,3).map(p => {
                   const tm = TYPE_META[p.type] || TYPE_META["Endurance"];
                   return (
-                    <div key={p.id} className="card card-hover" style={{ padding:"14px 16px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}
-                      onClick={() => setModal({type:"plan_detail", data:p})}>
+                    <div key={p.id} className="card card-hover" style={{ padding:"14px 16px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}>
                       <div style={{ width:40, height:40, borderRadius:10, background:tm.dark, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{tm.icon}</div>
                       <div style={{ flex:1 }}>
                         <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(p.date)}</div>
@@ -314,7 +372,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Quick stats */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:16 }}>
               <div className="card" style={{ padding:16 }}>
                 <div style={{ fontSize:9, color:"#555", letterSpacing:2, fontFamily:"'JetBrains Mono',monospace", marginBottom:8 }}>SEMAINE EN COURS</div>
@@ -379,9 +436,8 @@ export default function App() {
         {/* ─── ANALYSE ─── */}
         {view === "analyse" && (
           <div className="fade-up">
-            {/* ACWR Card */}
             <div className="card" style={{ padding:22, marginBottom:14, borderColor: acwr>1.3?"#FF6B6B44":"#1C1F27" }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>CHARGE · ACWR (ratio acute/chronic)</div>
+              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>CHARGE · ACWR</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:14 }}>
                 <div>
                   <div style={{ fontSize:42, fontWeight:800, color:acwrStatus.color, lineHeight:1 }}>{acwr.toFixed(2)}</div>
@@ -396,9 +452,6 @@ export default function App() {
                 <div style={{ position:"absolute", left:"40%", width:"45%", height:8, background:"#4ECDC433", borderRadius:4 }} />
                 <div style={{ position:"absolute", left:`${Math.min(acwr/2*100, 95)}%`, width:12, height:12, top:-2, borderRadius:"50%", background:acwrStatus.color, transform:"translateX(-50%)", border:"2px solid #080A0E" }} />
               </div>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:"#444", fontFamily:"'JetBrains Mono',monospace", marginTop:6 }}>
-                <span>0</span><span>SOUS-CHARGÉ</span><span>OPTIMAL</span><span>SURCHARGE</span><span>2.0</span>
-              </div>
               <div style={{ marginTop:14, padding:"12px", background:"#080A0E", borderRadius:8, fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace", lineHeight:1.7 }}>
                 {acwr > 1.3 ? "⚠ Risque de blessure élevé. Réduis la charge cette semaine de 20-30%."
                   : acwr > 1.15 ? "△ Charge modérée. Surveille ta récupération."
@@ -406,30 +459,29 @@ export default function App() {
               </div>
             </div>
 
-            {/* Volume chart */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>VOLUME HEBDOMADAIRE</div>
               <VolumeChart weeks={weeklyVol} />
             </div>
 
-            {/* Pace progression */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE (endurance)</div>
+              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE</div>
               {paceProgression.length > 1 && (
                 <div style={{ fontSize:11, color:"#4ECDC4", fontFamily:"'JetBrains Mono',monospace", marginBottom:14 }}>
                   {paceProgression[0].pace > paceProgression[paceProgression.length-1].pace
-                    ? `▲ +${((paceProgression[0].pace - paceProgression[paceProgression.length-1].pace)/paceProgression[0].pace*100).toFixed(1)}% d'amélioration`
+                    ? `▲ Amélioration détectée`
                     : "↔ Allure stable"}
                 </div>
               )}
               <PaceChart data={paceProgression} />
             </div>
 
-            {/* Variety */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VARIÉTÉ (4 dernières semaines)</div>
-                <span style={{ fontSize:11, color:varietyStatus.color, fontFamily:"'JetBrains Mono',monospace" }}>{varietyStatus.label}</span>
+                <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VARIÉTÉ (4 sem.)</div>
+                <span style={{ fontSize:11, color: varietyScore>=4?"#4ECDC4":varietyScore>=3?"#FFE66D":"#FF6B6B", fontFamily:"'JetBrains Mono',monospace" }}>
+                  {varietyScore>=4?"EXCELLENTE":varietyScore>=3?"BONNE":"À AMÉLIORER"}
+                </span>
               </div>
               {Object.entries(typeVariety).map(([type, count]) => {
                 const tm = TYPE_META[type] || TYPE_META["Endurance"];
@@ -446,11 +498,6 @@ export default function App() {
                   </div>
                 );
               })}
-              {varietyScore < 3 && (
-                <div style={{ marginTop:12, padding:"10px 12px", background:"#2b1a0033", border:"1px solid #FF9F4333", borderRadius:8, fontSize:11, color:"#FF9F43", fontFamily:"'JetBrains Mono',monospace" }}>
-                  💡 Ajoute du {Object.keys(TYPE_META).find(t => !typeVariety[t])} pour diversifier ton entraînement
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -460,8 +507,9 @@ export default function App() {
           <div className="fade-up">
             <div style={{ fontSize:11, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:14 }}>
               {done.length} SÉANCES · {totalKm.toFixed(0)} KM TOTAL
+              {done.filter(d=>d.fromStrava).length > 0 && <span style={{ color:"#FC4C02", marginLeft:8 }}>· {done.filter(d=>d.fromStrava).length} STRAVA</span>}
             </div>
-            {recentDone.map(r => {
+            {[...done].sort((a,b) => b.date.localeCompare(a.date)).map(r => {
               const tm = TYPE_META[r.type] || TYPE_META["Endurance"];
               const linked = planned.find(p => p.id === r.plannedId);
               const score = linked ? scoreSession(linked, r) : null;
@@ -470,7 +518,10 @@ export default function App() {
                   <div style={{ display:"flex", gap:12, alignItems:"center" }}>
                     <div style={{ width:44, height:44, borderRadius:10, background:tm.dark, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{tm.icon}</div>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace", marginBottom:2 }}>{fmtDate(r.date, { weekday:"long", day:"numeric", month:"long" })}</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                        <span style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(r.date, { weekday:"long", day:"numeric", month:"long" })}</span>
+                        {r.fromStrava && <span style={{ fontSize:9, color:"#FC4C02", fontFamily:"'JetBrains Mono',monospace" }}>STRAVA</span>}
+                      </div>
                       <div style={{ fontSize:14, fontWeight:700 }}>{r.type}</div>
                       <div style={{ display:"flex", gap:12, marginTop:4 }}>
                         {[`${r.dist} km`, `${r.dur} min`, pace(r.dist, r.dur)+"/km", r.hr?`${r.hr} bpm`:""].filter(Boolean).map(v => (
@@ -479,18 +530,17 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
-                      <span style={{ fontSize:20 }}>{FEELINGS[r.feeling-1]}</span>
+                      <span style={{ fontSize:20 }}>{FEELINGS[(r.feeling||3)-1]}</span>
                       {score !== null && <div style={{ fontSize:13, fontWeight:700, color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B" }}>{score}/100</div>}
                     </div>
                   </div>
                   {r.notes && <div style={{ marginTop:10, fontSize:11, color:"#666", fontFamily:"'JetBrains Mono',monospace", borderTop:"1px solid #1C1F27", paddingTop:10 }}>💬 {r.notes}</div>}
-                  {/* RPE bar */}
                   <div style={{ marginTop:10, display:"flex", gap:3, alignItems:"center" }}>
                     <span style={{ fontSize:9, color:"#444", fontFamily:"'JetBrains Mono',monospace", marginRight:4 }}>RPE</span>
                     {Array.from({length:10}).map((_,i) => (
-                      <div key={i} style={{ flex:1, height:6, borderRadius:1, background: i<r.rpe ? tm.color : "#1C1F27" }} />
+                      <div key={i} style={{ flex:1, height:6, borderRadius:1, background: i<(r.rpe||5) ? tm.color : "#1C1F27" }} />
                     ))}
-                    <span style={{ fontSize:9, color:"#444", fontFamily:"'JetBrains Mono',monospace", marginLeft:4 }}>{r.rpe}</span>
+                    <span style={{ fontSize:9, color:"#444", fontFamily:"'JetBrains Mono',monospace", marginLeft:4 }}>{r.rpe||"?"}</span>
                   </div>
                 </div>
               );
@@ -499,7 +549,7 @@ export default function App() {
         )}
       </div>
 
-      {/* BOTTOM NAV MOBILE */}
+      {/* BOTTOM NAV */}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:480, maxWidth:"100vw",
         background:"#0F1117", borderTop:"1px solid #1C1F27", display:"flex", zIndex:50 }}>
         {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl]) => (
@@ -512,12 +562,11 @@ export default function App() {
         ))}
       </div>
 
-      {/* ─── MODALS ─── */}
+      {/* MODALS */}
       {modal && (
         <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.85)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(6px)" }}>
           <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto" }}>
 
-            {/* PLAN FORM */}
             {modal.type === "plan" && (
               <>
                 <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Planifier une séance</div>
@@ -531,7 +580,7 @@ export default function App() {
                   <Field label="DISTANCE CIBLE (km)"><input type="number" className="inp" placeholder="10" value={planForm.targetDist} onChange={e=>setPlanForm({...planForm,targetDist:e.target.value})} /></Field>
                   <Field label="DURÉE CIBLE (min)"><input type="number" className="inp" placeholder="65" value={planForm.targetDur} onChange={e=>setPlanForm({...planForm,targetDur:e.target.value})} /></Field>
                   <Field label="FC CIBLE (bpm)"><input type="number" className="inp" placeholder="145" value={planForm.targetHR} onChange={e=>setPlanForm({...planForm,targetHR:e.target.value})} /></Field>
-                  <Field label="NOTES" full><textarea className="inp" rows={3} placeholder="Description de la séance, objectifs..." value={planForm.notes} onChange={e=>setPlanForm({...planForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
+                  <Field label="NOTES" full><textarea className="inp" rows={3} placeholder="Description..." value={planForm.notes} onChange={e=>setPlanForm({...planForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
                 </FormGrid>
                 <div style={{ display:"flex", gap:10, marginTop:24 }}>
                   <button className="btn-ghost" onClick={() => setModal(null)} style={{ flex:1, borderRadius:12, padding:14, fontFamily:"'JetBrains Mono',monospace", fontSize:12 }}>ANNULER</button>
@@ -540,7 +589,6 @@ export default function App() {
               </>
             )}
 
-            {/* LOG FORM */}
             {modal.type === "log" && (
               <>
                 <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Enregistrer une séance</div>
@@ -580,7 +628,6 @@ export default function App() {
   );
 }
 
-/* ─── SUB COMPONENTS ─── */
 function CompareBar({ planned, done }) {
   const items = [
     { label:"Distance", target:planned.targetDist, actual:done.dist, unit:"km" },
@@ -590,7 +637,6 @@ function CompareBar({ planned, done }) {
   return (
     <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
       {items.map(({ label, target, actual, unit }) => {
-        const pct = Math.min(actual/target, 1.5);
         const diff = ((actual-target)/target*100).toFixed(0);
         const ok = Math.abs(actual-target)/target < 0.1;
         return (
@@ -606,8 +652,8 @@ function CompareBar({ planned, done }) {
               </span>
             </div>
             <div style={{ height:4, background:"#1C1F27", borderRadius:2, position:"relative" }}>
-              <div style={{ height:4, width:`${Math.min(pct/1.5*100,100)}%`, background: ok?"#4ECDC4": Math.abs(pct-1)<0.2?"#FFE66D":"#FF6B6B", borderRadius:2 }} />
-              <div style={{ position:"absolute", left:`${1/1.5*100}%`, top:-3, width:2, height:10, background:"#E8E4DC", borderRadius:1 }} />
+              <div style={{ height:4, width:`${Math.min(Math.abs(actual/target)*100,100)}%`, background: ok?"#4ECDC4": Math.abs(+diff)<20?"#FFE66D":"#FF6B6B", borderRadius:2 }} />
+              <div style={{ position:"absolute", left:`${Math.min(1/1.5*100,100)}%`, top:-3, width:2, height:10, background:"#E8E4DC", borderRadius:1 }} />
             </div>
           </div>
         );
@@ -627,9 +673,7 @@ function VolumeChart({ weeks }) {
         return (
           <div key={w.wk} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
             <div style={{ fontSize:9, color: isLatest?"#E8E4DC":"#555", fontFamily:"'JetBrains Mono',monospace" }}>{w.dist.toFixed(0)}</div>
-            <div style={{ width:"100%", height:h, background: isLatest?"#FFE66D":"#1C1F27", borderRadius:"3px 3px 0 0", position:"relative" }}>
-              {isLatest && <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg,rgba(255,230,109,.2) 0%,transparent 100%)", borderRadius:"3px 3px 0 0" }} />}
-            </div>
+            <div style={{ width:"100%", height:h, background: isLatest?"#FFE66D":"#1C1F27", borderRadius:"3px 3px 0 0" }} />
             <div style={{ fontSize:8, color:"#333", fontFamily:"'JetBrains Mono',monospace" }}>
               {new Date(w.wk).toLocaleDateString("fr",{day:"numeric",month:"numeric"})}
             </div>
@@ -641,7 +685,7 @@ function VolumeChart({ weeks }) {
 }
 
 function PaceChart({ data }) {
-  if (data.length < 2) return <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace", padding:"20px 0", textAlign:"center" }}>Pas assez de données (min. 2 séances endurance)</div>;
+  if (data.length < 2) return <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace", padding:"20px 0", textAlign:"center" }}>Pas assez de données</div>;
   const max = Math.max(...data.map(d=>d.pace));
   const min = Math.min(...data.map(d=>d.pace));
   const w = 400; const h = 80; const pad = 10;
@@ -650,27 +694,21 @@ function PaceChart({ data }) {
     const y = pad + (1-(d.pace-min)/(max-min||1))*(h-2*pad);
     return `${x},${y}`;
   }).join(" ");
-  function fmt(s) { return `${Math.floor(s/60)}'${String(Math.round(s%60)).padStart(2,"0")}"`; }
   return (
-    <div>
-      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#555", fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>
-        <span>PLUS LENT {fmt(max)}</span><span>PLUS RAPIDE {fmt(min)}</span>
-      </div>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width:"100%", height:h }}>
-        <defs>
-          <linearGradient id="pg" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#FF6B6B"/>
-            <stop offset="100%" stopColor="#4ECDC4"/>
-          </linearGradient>
-        </defs>
-        <polyline points={pts} fill="none" stroke="url(#pg)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-        {data.map((d,i) => {
-          const x = pad + i/(data.length-1)*(w-2*pad);
-          const y = pad + (1-(d.pace-min)/(max-min||1))*(h-2*pad);
-          return <circle key={i} cx={x} cy={y} r={3} fill={i===data.length-1?"#4ECDC4":"#1C1F27"} stroke={i===data.length-1?"#4ECDC4":"#555"} strokeWidth={1.5}/>;
-        })}
-      </svg>
-    </div>
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width:"100%", height:h }}>
+      <defs>
+        <linearGradient id="pg" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stopColor="#FF6B6B"/>
+          <stop offset="100%" stopColor="#4ECDC4"/>
+        </linearGradient>
+      </defs>
+      <polyline points={pts} fill="none" stroke="url(#pg)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+      {data.map((d,i) => {
+        const x = pad + i/(data.length-1)*(w-2*pad);
+        const y = pad + (1-(d.pace-min)/(max-min||1))*(h-2*pad);
+        return <circle key={i} cx={x} cy={y} r={3} fill={i===data.length-1?"#4ECDC4":"#1C1F27"} stroke={i===data.length-1?"#4ECDC4":"#555"} strokeWidth={1.5}/>;
+      })}
+    </svg>
   );
 }
 
