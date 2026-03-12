@@ -762,7 +762,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
 // ── SETTINGS PAGE (réglages permanents) ──────────────────────────────
 // ═════════════════════════════════════════════════════════════════════
 
-export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isRegenerating }) {
+export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating }) {
   const [paceInputs, setPaceInputs] = useState({
     ef:    fmtPace(config.paces.ef),
     tempo: fmtPace(config.paces.tempo),
@@ -786,8 +786,8 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
     "Sortie longue":{color:"#C77DFF",icon:"◈◈◈"},
     "Footing":{color:"#A8DADC",icon:"〜"},
   };
-
   const SESSION_TYPES=["Endurance fondamentale","Fractionné / VMA","Tempo / Seuil","Sortie longue","Footing"];
+  const DOW2NAME={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
 
   return (
     <div>
@@ -799,17 +799,23 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
           return (
             <button key={dow} onClick={()=>{
               if(sel&&config.runDays.length<=2) return;
-              onUpdate({runDays:sel?config.runDays.filter(d=>d!==dow):[...config.runDays,dow].sort((a,b)=>{const o=[1,2,3,4,5,6,0];return o.indexOf(a)-o.indexOf(b);})});
+              onUpdate({runDays:sel
+                ?config.runDays.filter(d=>d!==dow)
+                :[...config.runDays,dow].sort((a,b)=>{const o=[1,2,3,4,5,6,0];return o.indexOf(a)-o.indexOf(b);})
+              });
             }} style={{
-              flex:1,border:`2px solid ${sel?"#00D2FF":"#1C1F27"}`,color:sel?"#00D2FF":"#555",
-              background:sel?"#001a24":"transparent",borderRadius:8,padding:"8px 4px",
-              fontSize:10,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",
+              flex:1,border:`2px solid ${sel?"#00D2FF":"#1C1F27"}`,
+              color:sel?"#00D2FF":"#555",
+              background:sel?"#001a24":"transparent",
+              borderRadius:8,padding:"8px 4px",
+              fontSize:10,cursor:"pointer",
+              fontFamily:"'JetBrains Mono',monospace",
             }}>{short}</button>
           );
         })}
       </div>
 
-      {/* Semaine type A/B */}
+      {/* Semaines A/B */}
       <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>SEMAINES TYPE (A/B ALTERNÉES)</div>
       {["A","B"].map(week=>{
         const isA=week==="A";
@@ -818,17 +824,19 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
         const wColor=isA?"#00D2FF":"#C77DFF";
         return (
           <div key={week} style={{marginBottom:16}}>
-            <div style={{fontSize:10,color:wColor,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block",letterSpacing:2}}>
+            <div style={{fontSize:10,color:wColor,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,
+              padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block",letterSpacing:2}}>
               SEM. {week} {isA?"(impaires)":"(paires)"}
             </div>
             {config.runDays.map((dow,slotIdx)=>{
-              const dow2name={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
               const slot=tpl.find(s=>s.slot===slotIdx);
               const current=slot?.type||"Footing";
               const tm=TYPEMETA[current]||TYPEMETA["Footing"];
               return (
                 <div key={dow} style={{marginBottom:10}}>
-                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{dow2name[dow]}</div>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>
+                    {DOW2NAME[dow]||"?"}
+                  </div>
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {SESSION_TYPES.map(type=>{
                       const t=TYPEMETA[type]||TYPEMETA["Footing"];
@@ -845,11 +853,18 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
                           borderRadius:8,padding:"5px 8px",
                           fontSize:9,cursor:"pointer",
                           fontFamily:"'JetBrains Mono',monospace",
-                        }}>{type.split(' ')[0]}</button>
+                        }}>
+                          {type.split(' ')[0]}
+                        </button>
                       );
-              })}
-            </div>
-            <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{tm.icon} {current}</div>
+                    })}
+                  </div>
+                  <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
+                    {tm.icon} {current}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -865,11 +880,16 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
         ].map(({key,label,color})=>(
           <div key={key}>
             <div style={{fontSize:9,color,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{label} /km</div>
-            <input style={{background:"#080A0E",border:`1px solid ${color}33`,color:"#E8E4DC",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"'JetBrains Mono',monospace",width:"100%",outline:"none"}}
+            <input style={{
+              background:"#080A0E",border:`1px solid ${color}33`,
+              color:"#E8E4DC",borderRadius:8,padding:"8px 10px",
+              fontSize:13,fontFamily:"'JetBrains Mono',monospace",
+              width:"100%",outline:"none",
+            }}
               value={paceInputs[key]}
               onChange={e=>setPaceInputs(p=>({...p,[key]:e.target.value}))}
               onBlur={commitPaces}
-              placeholder={`ex: 5'30"`}/>
+              placeholder="ex: 5'30\""/>
           </div>
         ))}
       </div>
@@ -879,11 +899,13 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
       <div style={{display:"flex",gap:6,marginBottom:20}}>
         {Object.entries(INTENSITY).map(([key,conf])=>(
           <button key={key} onClick={()=>onUpdate({intensity:key})}
-            style={{flex:1,border:`2px solid ${config.intensity===key?conf.color:"#1C1F27"}`,
+            style={{
+              flex:1,border:`2px solid ${config.intensity===key?conf.color:"#1C1F27"}`,
               background:config.intensity===key?conf.color+"22":"transparent",
               color:config.intensity===key?conf.color:"#555",
               borderRadius:10,padding:"8px 4px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace"}}>
+              fontFamily:"'JetBrains Mono',monospace",
+            }}>
             {conf.label}
           </button>
         ))}
@@ -894,11 +916,13 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
         {VMA_EXERCISES.map(ex=>(
           <button key={ex.id} onClick={()=>onUpdate({vmaExercise:ex.id})}
-            style={{border:`2px solid ${config.vmaExercise===ex.id?"#FF6B6B":"#1C1F27"}`,
+            style={{
+              border:`2px solid ${config.vmaExercise===ex.id?"#FF6B6B":"#1C1F27"}`,
               background:config.vmaExercise===ex.id?"#2b0d0d":"transparent",
               color:config.vmaExercise===ex.id?"#FF6B6B":"#555",
               borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace"}}>
+              fontFamily:"'JetBrains Mono',monospace",
+            }}>
             {ex.label}
           </button>
         ))}
@@ -909,11 +933,13 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:24}}>
         {TEMPO_EXERCISES.map(ex=>(
           <button key={ex.id} onClick={()=>onUpdate({tempoExercise:ex.id})}
-            style={{border:`2px solid ${config.tempoExercise===ex.id?"#FF9F43":"#1C1F27"}`,
+            style={{
+              border:`2px solid ${config.tempoExercise===ex.id?"#FF9F43":"#1C1F27"}`,
               background:config.tempoExercise===ex.id?"#2b1a00":"transparent",
               color:config.tempoExercise===ex.id?"#FF9F43":"#555",
               borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace"}}>
+              fontFamily:"'JetBrains Mono',monospace",
+            }}>
             {ex.label}
           </button>
         ))}
@@ -921,16 +947,19 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
 
       {/* Regenerate */}
       <button onClick={onRegenerate} style={{
-        width:"100%",background:"#00D2FF",color:"#080A0E",border:"none",borderRadius:12,
-        padding:16,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",
+        width:"100%",background:"#00D2FF",color:"#080A0E",border:"none",
+        borderRadius:12,padding:16,fontSize:13,fontWeight:700,cursor:"pointer",
+        fontFamily:"'JetBrains Mono',monospace",
         display:"flex",alignItems:"center",justifyContent:"center",gap:8,
       }}>
-        {isRegenerating?(
-          <span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>↻</span>
-        ):"⚡ REGÉNÉRER LES SEMAINES FUTURES"}
+        {isRegenerating
+          ?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>↻</span>
+          :"⚡ REGÉNÉRER LES SEMAINES FUTURES"
+        }
       </button>
       <div style={{fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:8,textAlign:"center"}}>
-        Seules les séances futures générées automatiquement seront modifiées.<br/>Tes séances manuelles et passées sont protégées.
+        Seules les séances futures générées automatiquement seront modifiées.<br/>
+        Tes séances manuelles et passées sont protégées.
       </div>
     </div>
   );
