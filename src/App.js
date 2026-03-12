@@ -9,9 +9,9 @@ const WEEKS_LEFT = Math.floor(DAYS_LEFT / 7);
 
 const TYPE_META = {
   "Footing":               { color: "#A8DADC", dark: "#0d1f20", icon: "〜", desc: "Run libre, pas structuré" },
-  "Endurance fondamentale":{ color: "#FFE66D", dark: "#2b2700", icon: "◈", desc: "Zone 2, FC ≤ 150 bpm" },
+  "Endurance fondamentale":{ color: "#6BF178", dark: "#0d2b0f", icon: "◈", desc: "Zone 2, FC ≤ 150 bpm" },
   "Tempo / Seuil":         { color: "#FF9F43", dark: "#2b1a00", icon: "◇", desc: "Allure 10km / seuil" },
-  "Fractionné / VMA":      { color: "#6BF178", dark: "#0d2b0f", icon: "▲▲", desc: "Intervalles intenses" },
+  "Fractionné / VMA":      { color: "#FF6B6B", dark: "#2b0d0d", icon: "▲▲", desc: "Intervalles intenses" },
   "Sortie longue":         { color: "#C77DFF", dark: "#1e0d2b", icon: "◈◈◈", desc: "Distance maximale" },
   "Course":                { color: "#FFD700", dark: "#2b2200", icon: "🏅", desc: "Compétition chronométrée" },
 };
