@@ -6,11 +6,10 @@ import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPac
 // ─── CONSTANTS ───────────────────────────────────────────────────────
 const MARATHON_DATE = "2026-10-25";
 const MARATHON      = new Date(MARATHON_DATE);
-const TODAY         = new Date("2026-03-11");
-const TODAY_STR     = "2026-03-11";
+const TODAY         = new Date();
+const TODAY_STR     = `${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}-${String(TODAY.getDate()).padStart(2,'0')}`;
 const DAYS_LEFT     = Math.ceil((MARATHON - TODAY) / 86400000);
 const WEEKS_LEFT    = Math.floor(DAYS_LEFT / 7);
-
 
 const VMA_DEFAULT = 15.24;
 
@@ -61,6 +60,246 @@ function scoreSession(planned,done) {
   const t=Math.max(0,100-Math.abs(done.dur-planned.targetDur)/planned.targetDur*100);
   const h=planned.targetHR&&done.hr?Math.max(0,100-Math.abs(done.hr-planned.targetHR)/planned.targetHR*100):100;
   return Math.round(d*0.4+t*0.3+h*0.3);
+}
+
+// ─── VMA CALCULATOR ──────────────────────────────────────────────────
+// Ratios physiologiques : allure observée → VMA estimée
+// VMA (km/h) = distance / durée → pace_s = 3600/vma_kmh
+// Si pace_ef = X sec/km, alors VMA = 3600 / (X / ratio_ef)
+const VMA_RATIO = {
+  "Endurance fondamentale": { ratio: 0.70, label: "EF", color: "#6BF178", desc: "~70% VMA", weight: 2 },
+  "Sortie longue":          { ratio: 0.72, label: "SL", color: "#C77DFF", desc: "~72% VMA", weight: 2 },
+  "Tempo / Seuil":          { ratio: 0.86, label: "SEUIL", color: "#FF9F43", desc: "~86% VMA", weight: 3 },
+  "Fractionné / VMA":       { ratio: 0.98, label: "VMA", color: "#FF6B6B", desc: "~98% VMA", weight: 4 },
+};
+
+function computeVMA(doneList) {
+  const cutoff = addDays(TODAY_STR, -28); // 4 semaines
+  const recent = doneList.filter(r => r.date >= cutoff && r.dist > 0 && r.dur > 0);
+
+  const results = {};
+  Object.entries(VMA_RATIO).forEach(([type, meta]) => {
+    const sessions = recent.filter(r => r.type === type && r.dist >= (type === "Fractionné / VMA" ? 2 : 4));
+    if (sessions.length === 0) return;
+    // Allure moyenne en sec/km
+    const paces = sessions.map(r => (r.dur * 60) / r.dist);
+    const avgPace = paces.reduce((s, v) => s + v, 0) / paces.length;
+    // VMA estimée : si on court à X% de VMA → VMA = pace_s / ratio × (3600/3600) en km/h
+    const vmaKmh = 3600 / (avgPace / meta.ratio);
+    const paceAtVMA = 3600 / vmaKmh; // sec/km à 100% VMA
+    results[type] = {
+      ...meta,
+      avgPace,            // sec/km constaté
+      vmaEstimate: vmaKmh,
+      paceAtVMA,
+      sessions: sessions.length,
+      pct: Math.round(meta.ratio * 100),
+    };
+  });
+
+  if (Object.keys(results).length === 0) return null;
+
+  // Moyenne pondérée
+  let totalWeight = 0, weightedVMA = 0;
+  Object.values(results).forEach(r => {
+    weightedVMA += r.vmaEstimate * r.weight;
+    totalWeight += r.weight;
+  });
+  const finalVMA = Math.round((weightedVMA / totalWeight) * 100) / 100;
+
+  return { breakdown: results, finalVMA };
+}
+
+function fmtPaceStr(secPerKm) {
+  if (!secPerKm || secPerKm <= 0) return "--'--\"";
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}'${String(s).padStart(2, '0')}"`;
+}
+
+// ─── VMA MODAL ───────────────────────────────────────────────────────
+function VMAModal({ done, currentVMA, onClose }) {
+  const result = useMemo(() => computeVMA(done), [done]);
+
+  const rows = Object.entries(VMA_RATIO).map(([type, meta]) => {
+    const data = result?.breakdown?.[type];
+    return { type, meta, data };
+  });
+
+  const finalVMA = result?.finalVMA ?? currentVMA;
+  const diff = (finalVMA - currentVMA).toFixed(2);
+  const diffPositive = finalVMA > currentVMA;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,
+        display:"flex",alignItems:"flex-end",justifyContent:"center",
+        backdropFilter:"blur(10px)",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width:"100%",maxWidth:480,background:"#0F1117",
+          border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",
+          padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom, 12px))",
+          maxHeight:"88vh",overflowY:"auto",
+          animation:"popUp .28s cubic-bezier(.22,1,.36,1) forwards",
+        }}
+      >
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+          <div>
+            <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>⚡ VMA CALCULÉE</div>
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style={{fontSize:44,fontWeight:800,letterSpacing:-2,color:"#E8E4DC"}}>{finalVMA.toFixed(2)}</span>
+              <span style={{fontSize:16,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>km/h</span>
+            </div>
+            {result && (
+              <div style={{fontSize:11,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
+                <span style={{color:diffPositive?"#6BF178":"#FF9F43"}}>
+                  {diffPositive?"▲":"▼"} {Math.abs(+diff)} km/h
+                </span>
+                <span style={{color:"#444",marginLeft:6}}>vs config actuelle ({currentVMA} km/h)</span>
+              </div>
+            )}
+            {!result && (
+              <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
+                Pas assez de données (4 sem.) · config actuelle
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}
+          >✕</button>
+        </div>
+
+        {/* Sub-header */}
+        <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:20,lineHeight:1.7,padding:"12px 14px",background:"#080A0E",borderRadius:10,border:"1px solid #1C1F27"}}>
+          Calculé à partir de tes <span style={{color:"#E8E4DC"}}>4 dernières semaines</span> de séances · chaque type d'entraînement correspond à un % physiologique de ta VMA réelle
+        </div>
+
+        {/* Breakdown rows */}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {rows.map(({ type, meta, data }) => {
+            const hasData = !!data;
+            const barWidth = hasData ? Math.min((data.avgPace / (3600 / data.vmaEstimate * (1/meta.ratio))) * 100, 100) : 0;
+
+            return (
+              <div
+                key={type}
+                style={{
+                  background: hasData ? meta.color + "08" : "#080A0E",
+                  border: `1px solid ${hasData ? meta.color + "33" : "#1C1F27"}`,
+                  borderRadius:14,
+                  padding:"16px 18px",
+                  opacity: hasData ? 1 : 0.45,
+                }}
+              >
+                {/* Top row */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{
+                      width:32,height:32,borderRadius:8,
+                      background: hasData ? meta.color + "20" : "#1C1F27",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:13,color:meta.color,
+                    }}>
+                      {TYPE_META[type]?.icon}
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:hasData?meta.color:"#555"}}>{meta.label}</div>
+                      <div style={{fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>{meta.desc}</div>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {hasData ? (
+                      <>
+                        <div style={{fontSize:18,fontWeight:800,color:"#E8E4DC"}}>{data.vmaEstimate.toFixed(1)} <span style={{fontSize:11,color:"#555",fontWeight:400}}>km/h</span></div>
+                        <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{data.sessions} séance{data.sessions>1?"s":""}</div>
+                      </>
+                    ) : (
+                      <div style={{fontSize:11,color:"#333",fontFamily:"'JetBrains Mono',monospace"}}>Pas de données</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                {hasData && (
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>ALLURE CONSTATÉE</div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#E8E4DC"}}>{fmtPaceStr(data.avgPace)}/km</div>
+                    </div>
+                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>RATIO UTILISÉ</div>
+                      <div style={{fontSize:14,fontWeight:700,color:meta.color}}>{data.pct}% VMA</div>
+                    </div>
+                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>→ VMA EST.</div>
+                      <div style={{fontSize:14,fontWeight:700,color:meta.color}}>{data.vmaEstimate.toFixed(1)} km/h</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>
+                    <span>Contribution au calcul</span>
+                    <span style={{color:meta.color}}>poids ×{meta.weight}</span>
+                  </div>
+                  <div style={{height:6,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
+                    {hasData && (
+                      <div
+                        style={{
+                          height:"100%",
+                          width:`${(meta.weight / 4) * 100}%`,
+                          background:`linear-gradient(90deg, ${meta.color}88, ${meta.color})`,
+                          borderRadius:3,
+                          transition:"width 1s ease",
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Formula explication */}
+        <div style={{marginTop:20,padding:"16px",background:"#080A0E",borderRadius:12,border:"1px solid #1C1F27"}}>
+          <div style={{fontSize:9,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>COMMENT C'EST CALCULÉ</div>
+          <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.8}}>
+            Chaque type de séance correspond à un % fixe de ta VMA :<br/>
+            <span style={{color:"#6BF178"}}>EF = 70%</span> · <span style={{color:"#C77DFF"}}>SL = 72%</span> · <span style={{color:"#FF9F43"}}>Seuil = 86%</span> · <span style={{color:"#FF6B6B"}}>VMA = 98%</span><br/><br/>
+            <span style={{color:"#E8E4DC"}}>VMA estimée = allure constatée ÷ ratio</span><br/>
+            La VMA finale = moyenne pondérée (séances VMA = poids ×4, seuil ×3, EF/SL ×2)
+          </div>
+        </div>
+
+        {/* CTA */}
+        {result && Math.abs(+diff) >= 0.2 && (
+          <div style={{
+            marginTop:14,padding:"14px 16px",
+            background: diffPositive ? "#6BF17811" : "#FF9F4311",
+            border: `1px solid ${diffPositive ? "#6BF17833" : "#FF9F4333"}`,
+            borderRadius:12,
+            fontSize:11,color:diffPositive?"#6BF178":"#FF9F43",
+            fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,
+          }}>
+            {diffPositive
+              ? `✓ Ta VMA calculée (${finalVMA} km/h) est supérieure à ta config (${currentVMA} km/h). Pense à recalibrer ton plan dans les réglages !`
+              : `△ Ta VMA calculée (${finalVMA} km/h) est inférieure à ta config (${currentVMA} km/h). Tes allures cibles sont peut-être trop ambitieuses.`
+            }
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── CHARTS ──────────────────────────────────────────────────────────
@@ -151,6 +390,7 @@ export default function App() {
   const [stravaLoading,   setStravaLoading]   = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
   const [editForm,  setEditForm]  = useState(null);
+  const [showVMA,   setShowVMA]   = useState(false);
 
   // Plan config (wizard)
   const [planConfig, setPlanConfig] = useState(()=>STORE.get("plan_config",null)||defaultConfig(VMA_DEFAULT));
@@ -211,18 +451,13 @@ export default function App() {
     setTimeout(()=>setSyncStatus(""),3000); setStravaLoading(false);
   }
 
-  // ── Generate plan from config ─────────────────────────────────────
   async function generateAndSavePlan(cfg){
     setPlanGenLoading(true);
     const config = cfg || planConfig;
-    // Delete existing generated future sessions
-    // Delete ALL future generated sessions (cleans up old plan-xxx-N ids too)
     const toDelete = planned.filter(p=>p.generated && parseDate(p.date) > parseDate(TODAY_STR));
     for(const p of toDelete){ await deletePlanned(p.id); }
-    // Also delete any old-format generated sessions with id starting "plan-"
     const oldFormat = planned.filter(p=>p.id && p.id.startsWith('plan-') && parseDate(p.date) > parseDate(TODAY_STR));
     for(const p of oldFormat){ await deletePlanned(p.id); }
-    // Generate new sessions
     const sessions = generatePlanFromConfig(config, planned.filter(p=>!p.generated));
     for(const s of sessions){ await savePlanned(s); }
     setPlanned(prev=>{
@@ -256,7 +491,6 @@ export default function App() {
     setPlanned(prev=>prev.filter(p=>p.id!==id));
   }
 
-  // ── Coach IA ───────────────────────────────────────────────────────
   function buildCoachContext(){
     const recentDone=[...done].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,20);
     const weeks={};
@@ -356,7 +590,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     await askCoach(msg);
   }
 
-  // ── Weekly stats ───────────────────────────────────────────────────
   const weeklyVol=useMemo(()=>{
     const weeks={};
     done.forEach(r=>{
@@ -374,7 +607,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
   const totalKm  = done.reduce((s,r)=>s+r.dist,0);
   const acwrStatus = acwr>1.3?{label:"RISQUE ÉLEVÉ",color:"#FF6B6B"}:acwr>1.15?{label:"CHARGE MODÉRÉE",color:"#FF9F43"}:{label:"OPTIMAL",color:"#4ECDC4"};
 
-  // ── Volume chart data ──────────────────────────────────────────────
   const volumeData=useMemo(()=>{
     const sel=PERIODS.find(p=>p.key===volPeriod);
     const cutoffDate=sel.days?addDays(TODAY_STR,-sel.days):null;
@@ -420,7 +652,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     return counts;
   },[done,varPeriod]);
 
-  // ── Forms ──────────────────────────────────────────────────────────
   const [planForm,setPlanForm]=useState({date:TODAY_STR,type:"Endurance fondamentale",targetDist:"",targetDur:"",targetHR:"",notes:""});
   const [logForm, setLogForm] =useState({date:TODAY_STR,plannedId:"",type:"Endurance fondamentale",dist:"",dur:"",hr:"",rpe:"6",feeling:"3",notes:""});
 
@@ -459,7 +690,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
   }
   function fmtPaceVal(v){ const m=Math.floor(v/60),s=Math.round(v%60); return `${m}'${String(s).padStart(2,'0')}"`; }
 
-  // ── Week plan vs real ──────────────────────────────────────────────
   const weekCompare=useMemo(()=>{
     const curWk=wkKey(TODAY_STR);
     const wkPlanned=planned.filter(p=>wkKey(p.date)===curWk);
@@ -469,6 +699,12 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     const completion=plannedKm>0?Math.round(doneKm/plannedKm*100):null;
     return {planned:wkPlanned,done:wkDone,plannedKm,doneKm,completion};
   },[planned,done]);
+
+  // VMA calculée pour le badge header
+  const computedVMA = useMemo(() => computeVMA(done), [done]);
+  const displayVMA = computedVMA?.finalVMA ?? planConfig.vma;
+  const vmaDiff = computedVMA ? Math.abs(displayVMA - planConfig.vma) : 0;
+  const vmaChanged = vmaDiff >= 0.2;
 
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
@@ -487,6 +723,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     .fade-up{animation:fadeUp .35s ease forwards}
     @keyframes pop{0%{transform:scale(.95);opacity:0}100%{transform:scale(1);opacity:1}}
     .pop{animation:pop .2s ease forwards}
+    @keyframes popUp{0%{transform:translateY(30px);opacity:0}100%{transform:translateY(0);opacity:1}}
     .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-family:'JetBrains Mono',monospace}
     .score-ring{transition:stroke-dashoffset 1s ease}
     @keyframes spin{to{transform:rotate(360deg)}}
@@ -499,6 +736,11 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     .chat-inp:focus{border-color:#333}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
     .pulse{animation:pulse 1.5s ease-in-out infinite}
+    .vma-badge{transition:all .2s;cursor:pointer}
+    .vma-badge:hover{opacity:.8;transform:scale(.97)}
+    @keyframes vmaPing{0%{transform:scale(1);opacity:1}70%{transform:scale(1.8);opacity:0}100%{transform:scale(1.8);opacity:0}}
+    .vma-ping{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#00D2FF;animation:vmaPing 2s ease-out infinite}
+    .vma-dot{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#00D2FF}
   `;
 
   if(loading) return (
@@ -514,7 +756,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
       <style>{css}</style>
 
       {/* TOP */}
-      <div style={{padding:"20px 20px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{padding:"20px 20px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{fontSize:11,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>MARATHON DE LILLE</div>
           <div style={{fontSize:28,fontWeight:800,letterSpacing:-1,marginTop:2}}>
@@ -522,11 +764,38 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
             <span style={{fontSize:14,color:"#333",margin:"0 6px"}}>·</span>
             {WEEKS_LEFT}<span style={{fontSize:14,color:"#555",fontWeight:400,marginLeft:4}}>sem.</span>
           </div>
-          <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026 · VMA {planConfig.vma} km/h</div>
+          <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026</div>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:10,padding:"8px 14px",fontSize:12,fontFamily:"'JetBrains Mono',monospace"}}>+ PLANIFIER</button>
-          <button className="btn-primary" onClick={()=>logSession()} style={{background:"#E8E4DC",color:"#080A0E",borderRadius:10,padding:"8px 14px",fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>+ LOG</button>
+
+        {/* VMA BADGE — cliquable */}
+        <div
+          className="vma-badge"
+          onClick={() => setShowVMA(true)}
+          style={{
+            position:"relative",
+            background: vmaChanged ? "linear-gradient(135deg,#001a24,#00D2FF18)" : "#0F1117",
+            border: `1px solid ${vmaChanged ? "#00D2FF55" : "#1C1F27"}`,
+            borderRadius:14,
+            padding:"12px 16px",
+            textAlign:"center",
+            minWidth:90,
+          }}
+        >
+          {/* Ping indicator si VMA calculée différente */}
+          {vmaChanged && (
+            <>
+              <div className="vma-ping" />
+              <div className="vma-dot" />
+            </>
+          )}
+          <div style={{fontSize:8,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA</div>
+          <div style={{fontSize:22,fontWeight:800,color:vmaChanged?"#00D2FF":"#E8E4DC",letterSpacing:-1,lineHeight:1}}>
+            {displayVMA.toFixed(2)}
+          </div>
+          <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>km/h · CALCULÉE</div>
+          <div style={{fontSize:8,color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace",marginTop:2,opacity:0.7}}>
+            ⚡ VOIR DÉTAIL
+          </div>
         </div>
       </div>
 
@@ -554,7 +823,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         )}
       </div>
 
-      {/* NAV — 5 onglets */}
+      {/* NAV */}
       <div style={{display:"flex",gap:3,padding:"16px 20px 0"}}>
         {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["coach","✦","COACH"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl])=>(
           <button key={v} className="nav-tab" onClick={()=>setView(v)}
@@ -620,7 +889,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               );
             })}
 
-            {/* Semaine en cours — comparaison plan vs réel */}
             <div className="card" style={{padding:20,marginBottom:14}}>
               <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:14}}>SEMAINE EN COURS · PLAN VS RÉEL</div>
               <div style={{display:"flex",gap:10,marginBottom:14}}>
@@ -694,11 +962,8 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* ═══ PLAN ═══ */}
         {view==="plan" && (
           <div className="fade-up">
-
-            {/* Plan header */}
             {!showSettings ? (
               <>
-                {/* Config summary card */}
                 <div className="card" style={{padding:20,marginBottom:14,border:"1px solid #00D2FF22",background:"linear-gradient(135deg,#001a24,#080A0E)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                     <div>
@@ -710,8 +975,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                       <button onClick={()=>setShowSettings(true)} className="btn-ghost" style={{borderRadius:10,padding:"8px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>⚙ RÉGLAGES</button>
                     </div>
                   </div>
-
-                  {/* Allures pills */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
                     {[
                       {label:"EF",pace:planConfig.paces.ef,color:"#6BF178"},
@@ -724,7 +987,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                       </span>
                     ))}
                   </div>
-
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>setShowWizard(true)} className="btn-ghost" style={{flex:1,borderRadius:10,padding:"10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace",textAlign:"center"}}>
                       🔄 NOUVEAU PLAN
@@ -736,7 +998,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   </div>
                 </div>
 
-                {/* Session list */}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>PLANNING · {planned.filter(p=>isFuture(p.date)).length} À VENIR</div>
                   <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>+ AJOUTER</button>
@@ -781,7 +1042,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                 })}
               </>
             ) : (
-              /* ── SETTINGS ── */
               <div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
                   <div style={{fontSize:18,fontWeight:800}}>Réglages du plan</div>
@@ -802,8 +1062,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* ═══ COACH IA ═══ */}
         {view==="coach" && (
           <div className="fade-up">
-
-            {/* Header card */}
             <div className="card" style={{padding:22,marginBottom:14,background:"linear-gradient(135deg,#0F1117 0%,#0d1f1a 100%)",border:"1px solid #6BF17822"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
                 <div>
@@ -818,8 +1076,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   {coachLoading?<span className="spin" style={{color:"#080A0E"}}>↻</span>:"✦ BILAN"}
                 </button>
               </div>
-
-              {/* Stats rapides */}
               <div style={{display:"flex",gap:8}}>
                 {[
                   ["VMA",`${planConfig.vma} km/h`,"#00D2FF"],
@@ -834,7 +1090,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               </div>
             </div>
 
-            {/* Message coach */}
             {coachMsg&&(
               <div className="card" style={{padding:22,marginBottom:14,border:"1px solid #6BF17833"}}>
                 <div style={{fontSize:9,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:12}}>✦ MESSAGE DU COACH</div>
@@ -849,7 +1104,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               </div>
             )}
 
-            {/* Historique chat */}
             {chatHistory.length>0&&(
               <div style={{marginBottom:14}}>
                 {chatHistory.map((m,i)=>(
@@ -865,13 +1119,12 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               </div>
             )}
 
-            {/* Chat input */}
             <div style={{position:"sticky",bottom:0,paddingBottom:4,background:"#080A0E",paddingTop:8}}>
               <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
                 <textarea className="chat-inp" rows={2} value={chatInput}
                   onChange={e=>setChatInput(e.target.value)}
                   onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}}
-                  placeholder="Pose une question au coach... (ex: quelle allure pour ma sortie longue demain ?)"/>
+                  placeholder="Pose une question au coach..."/>
                 <button onClick={sendChat} className="btn-primary"
                   style={{background:"#6BF178",color:"#080A0E",borderRadius:12,padding:"14px",fontSize:16,flexShrink:0,height:54}}>
                   {coachLoading?<span className="spin" style={{color:"#080A0E",fontSize:14}}>↻</span>:"→"}
@@ -906,7 +1159,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               </div>
             </div>
 
-            {/* Volume */}
             <div className="card" style={{padding:22,marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                 <div>
@@ -949,7 +1201,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               })()}
             </div>
 
-            {/* Allure */}
             <div className="card" style={{padding:22,marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                 <div>
@@ -978,7 +1229,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               })()}
             </div>
 
-            {/* Variété */}
             <div className="card" style={{padding:22,marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                 <div>
@@ -1083,6 +1333,15 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
           </button>
         ))}
       </div>
+
+      {/* VMA MODAL */}
+      {showVMA && (
+        <VMAModal
+          done={done}
+          currentVMA={planConfig.vma}
+          onClose={() => setShowVMA(false)}
+        />
+      )}
 
       {/* WIZARD MODAL */}
       {showWizard&&(
