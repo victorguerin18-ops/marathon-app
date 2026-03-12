@@ -24,6 +24,44 @@ const TYPE_META = {
   "Évaluation VMA":        { color:"#00D2FF", dark:"#001f2b", icon:"⚡",  desc:"Test 6 min · Recalibrage VMA" },
 };
 
+const FEELINGS = ["😣","😕","😐","🙂","😄"];
+
+const STORE = {
+  get: (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+  set: (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+// ─── DATE HELPERS ────────────────────────────────────────────────────
+function parseDate(str) {
+  const [y,m,d] = str.split('-'); return new Date(+y, +m-1, +d);
+}
+function addDays(dateStr, n) {
+  const dt = parseDate(dateStr); dt.setDate(dt.getDate()+n);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+function wkKey(dateStr) {
+  const dt = parseDate(dateStr); const day = dt.getDay()||7;
+  const mon = new Date(dt); mon.setDate(dt.getDate()-day+1);
+  return `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`;
+}
+function fmtDate(d, opts={weekday:"short",day:"numeric",month:"short"}) {
+  const [y,m,day]=d.split('-'); return new Date(+y,+m-1,+day).toLocaleDateString("fr-FR",opts);
+}
+function isToday(d)  { return d === TODAY_STR; }
+function isFuture(d) { return parseDate(d) > TODAY; }
+function isPast(d)   { return parseDate(d) < TODAY; }
+function pace(dist,dur) {
+  if(!dist||!dur) return "--'--\"";
+  const s=(dur*60)/dist;
+  return `${Math.floor(s/60)}'${String(Math.round(s%60)).padStart(2,"0")}"`;
+}
+function scoreSession(planned,done) {
+  if(!planned||!done) return null;
+  const d=Math.max(0,100-Math.abs(done.dist-planned.targetDist)/planned.targetDist*100);
+  const t=Math.max(0,100-Math.abs(done.dur-planned.targetDur)/planned.targetDur*100);
+  const h=planned.targetHR&&done.hr?Math.max(0,100-Math.abs(done.hr-planned.targetHR)/planned.targetHR*100):100;
+  return Math.round(d*0.4+t*0.3+h*0.3);
+}
 
 // ─── CHARTS ──────────────────────────────────────────────────────────
 function Chart({ data, color, formatY, smooth }) {
