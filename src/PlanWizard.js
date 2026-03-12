@@ -19,10 +19,6 @@ function wkKey(str) {
   const m = new Date(dt); m.setDate(dt.getDate()-day+1);
   return `${m.getFullYear()}-${String(m.getMonth()+1).padStart(2,'0')}-${String(m.getDate()).padStart(2,'0')}`;
 }
-function fmtShort(str) {
-  const [y,m,d] = str.split('-');
-  return new Date(+y,+m-1,+d).toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
-}
 
 // ── Allure helpers ────────────────────────────────────────────────────
 export function vmaToMinKm(vma, pct) { return 60 / (vma * pct); }
@@ -30,8 +26,6 @@ export function fmtPace(minKm) {
   const m = Math.floor(minKm); const s = Math.round((minKm-m)*60);
   return `${m}'${String(s).padStart(2,'0')}"`;
 }
-function minKmToSec(minKm) { return Math.round(minKm * 60); }
-function secToMinKm(sec) { return sec / 60; }
 function parsePaceInput(str) {
   // accepts "5'30"" or "5:30" or "5.5"
   const clean = str.replace(/"/g,'').trim();
@@ -170,7 +164,7 @@ export function defaultConfig(vma=15.24) {
 
 // ── Plan generator (pure function) ───────────────────────────────────
 export function generatePlanFromConfig(config, existingPlanned=[]) {
-  const { vma, runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate } = config;
+  const { runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate } = config;
   const intConf = INTENSITY[intensity];
   const vmaEx   = VMA_EXERCISES.find(e=>e.id===vmaExercise) || VMA_EXERCISES[0];
   const tempoEx = TEMPO_EXERCISES.find(e=>e.id===tempoExercise) || TEMPO_EXERCISES[0];
@@ -180,7 +174,6 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
   const vmaPace   = fmtPace(paces.vma);
   const slPace    = fmtPace(paces.sl);
 
-  const existingIds = new Set(existingPlanned.map(p=>p.id));
   // Don't overwrite manually-created sessions (non-generated) in the future
   const existingDates = new Set(
     existingPlanned
@@ -206,8 +199,7 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
     if(slotIdx === -1) { cur.setDate(cur.getDate()+1); continue; }
     if(existingDates.has(ds)) { cur.setDate(cur.getDate()+1); continue; }
 
-    const totalWeeks = 32;
-    const w = weekNum;
+      const w = weekNum;
     const phase = w<=8?"base": w<=20?"specific": w<=28?"marathon":"taper";
     const isEvalWeek = [0,6,12,18,24].includes(w);
     const isRecoveryWeek = [4,9,14,19,24].includes(w);

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities } from './strava';
 import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned } from './db';
-import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace, vmaToMinKm } from './PlanWizard';
+import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace } from './PlanWizard';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────
 const MARATHON_DATE = "2026-10-25";
