@@ -42,8 +42,8 @@ function fmtDate(d, opts = { weekday:"short", day:"numeric", month:"short" }) {
 function isToday(d) { return d === TODAY.toISOString().slice(0,10); }
 function isFuture(d) { const [y,m,day] = d.split('-'); return new Date(+y,+m-1,+day) > TODAY; }
 function isPast(d) { const [y,m,day] = d.split('-'); return new Date(+y,+m-1,+day) < TODAY; }
-function scoreSession(planned, done) {
 
+function scoreSession(planned, done) {
   if (!planned || !done) return null;
   const distScore = Math.max(0, 100 - Math.abs(done.dist - planned.targetDist) / planned.targetDist * 100);
   const durScore  = Math.max(0, 100 - Math.abs(done.dur - planned.targetDur) / planned.targetDur * 100);
@@ -135,6 +135,7 @@ export default function App() {
 
   const [planForm, setPlanForm] = useState({ date:todayStr, type:"Endurance", targetDist:"", targetDur:"", targetHR:"", notes:"" });
   const [logForm,  setLogForm]  = useState({ date:todayStr, plannedId:"", type:"Endurance", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
+  const [editForm, setEditForm] = useState(null);
 
   async function addPlanned() {
     const p = { id:"p"+Date.now(), ...planForm, targetDist:+planForm.targetDist, targetDur:+planForm.targetDur, targetHR:planForm.targetHR?+planForm.targetHR:null };
@@ -151,6 +152,18 @@ export default function App() {
   async function submitLog() {
     const r = { id:"d"+Date.now(), ...logForm, dist:+logForm.dist, dur:+logForm.dur, hr:logForm.hr?+logForm.hr:null, rpe:+logForm.rpe, feeling:+logForm.feeling };
     await saveDone(r); setDone(prev => [...prev, r]); setModal(null);
+  }
+
+  function openEdit(r) {
+    setEditForm({ ...r, dist:String(r.dist), dur:String(r.dur), hr:r.hr?String(r.hr):"", rpe:String(r.rpe||6), feeling:String(r.feeling||3) });
+    setModal({ type:"edit" });
+  }
+
+  async function submitEdit() {
+    const updated = { ...editForm, dist:+editForm.dist, dur:+editForm.dur, hr:editForm.hr?+editForm.hr:null, rpe:+editForm.rpe, feeling:+editForm.feeling };
+    await saveDone(updated);
+    setDone(prev => prev.map(r => r.id === updated.id ? updated : r));
+    setModal(null);
   }
 
   const acwrStatus = acwr > 1.3 ? { label:"RISQUE ÉLEVÉ", color:"#FF6B6B" } : acwr > 1.15 ? { label:"CHARGE MODÉRÉE", color:"#FF9F43" } : { label:"OPTIMAL", color:"#4ECDC4" };
@@ -171,6 +184,8 @@ export default function App() {
     .btn-primary:hover{opacity:.85;transform:scale(.98)}
     .btn-ghost{transition:all .2s;background:transparent;border:1px solid #222;cursor:pointer;font-family:inherit;color:#888}
     .btn-ghost:hover{border-color:#444;color:#ccc}
+    .btn-danger{transition:all .2s;background:transparent;border:1px solid #FF6B6B33;cursor:pointer;font-family:inherit;color:#FF6B6B}
+    .btn-danger:hover{background:#FF6B6B22}
     .inp{background:#080A0E;border:1px solid #1C1F27;color:#E8E4DC;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;width:100%;outline:none;transition:border .2s}
     .inp:focus{border-color:#444}
     @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
@@ -182,6 +197,8 @@ export default function App() {
     select option{background:#0F1117}
     @keyframes spin{to{transform:rotate(360deg)}}
     .spin{animation:spin 1s linear infinite;display:inline-block}
+    .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 6px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:10px;flex:1;text-align:center}
+    .type-btn:hover{opacity:.8}
   `;
 
   if (loading) return (
@@ -439,16 +456,19 @@ export default function App() {
                         <span style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(r.date,{weekday:"long",day:"numeric",month:"long"})}</span>
                         {r.fromStrava && <span style={{ fontSize:9, color:"#FC4C02", fontFamily:"'JetBrains Mono',monospace" }}>STRAVA</span>}
                       </div>
-                      <div style={{ fontSize:14, fontWeight:700 }}>{r.type}</div>
-                      <div style={{ display:"flex", gap:12, marginTop:4, flexWrap:"wrap" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span className="pill" style={{ background:tm.dark, color:tm.color }}>{tm.icon} {r.type}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:12, marginTop:6, flexWrap:"wrap" }}>
                         {[`${r.dist} km`,`${r.dur} min`,pace(r.dist,r.dur)+"/km",r.hr?`${r.hr} bpm`:""].filter(Boolean).map(v => (
                           <span key={v} style={{ fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace" }}>{v}</span>
                         ))}
                       </div>
                     </div>
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
                       <span style={{ fontSize:20 }}>{FEELINGS[(r.feeling||3)-1]}</span>
                       {score!==null && <div style={{ fontSize:13, fontWeight:700, color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B" }}>{score}/100</div>}
+                      <button className="btn-ghost" onClick={() => openEdit(r)} style={{ borderRadius:8, padding:"4px 10px", fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>✏ MODIFIER</button>
                     </div>
                   </div>
                   {r.notes && <div style={{ marginTop:10, fontSize:11, color:"#666", fontFamily:"'JetBrains Mono',monospace", borderTop:"1px solid #1C1F27", paddingTop:10 }}>💬 {r.notes}</div>}
@@ -464,6 +484,7 @@ export default function App() {
         )}
       </div>
 
+      {/* BOTTOM NAV */}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:480, maxWidth:"100vw", background:"#0F1117", borderTop:"1px solid #1C1F27", display:"flex", zIndex:50 }}>
         {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl]) => (
           <button key={v} className="nav-tab" onClick={() => setView(v)} style={{ flex:1, padding:"12px 0 8px", color:view===v?"#E8E4DC":"#444", background:"transparent", display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
@@ -473,9 +494,12 @@ export default function App() {
         ))}
       </div>
 
+      {/* MODALS */}
       {modal && (
         <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.85)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(6px)" }}>
           <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto" }}>
+
+            {/* PLAN */}
             {modal.type === "plan" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Planifier une séance</div>
               <FormGrid>
@@ -491,6 +515,8 @@ export default function App() {
                 <button className="btn-primary" onClick={addPlanned} style={{ flex:2, background:"#E8E4DC", color:"#080A0E", borderRadius:12, padding:14, fontSize:13, fontWeight:700 }}>ENREGISTRER</button>
               </div>
             </>)}
+
+            {/* LOG */}
             {modal.type === "log" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Enregistrer une séance</div>
               <FormGrid>
@@ -505,7 +531,7 @@ export default function App() {
                 </Field>
                 <Field label="RESSENTI" full>
                   <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
-                    {FEELINGS.map((f,i) => <button key={i} onClick={()=>setLogForm({...logForm,feeling:String(i+1)})} style={{ fontSize:28, background:"transparent", border:`2px solid ${+logForm.feeling===i+1?"#FFE66D":"transparent"}`, borderRadius:10, padding:"4px 8px", cursor:"pointer", transition:"all .2s" }}>{f}</button>)}
+                    {FEELINGS.map((f,i) => <button key={i} onClick={()=>setLogForm({...logForm,feeling:String(i+1)})} style={{ fontSize:28, background:"transparent", border:`2px solid ${+logForm.feeling===i+1?"#FFE66D":"transparent"}`, borderRadius:10, padding:"4px 8px", cursor:"pointer" }}>{f}</button>)}
                   </div>
                 </Field>
                 <Field label="NOTES" full><textarea className="inp" rows={2} placeholder="Ressenti, conditions..." value={logForm.notes} onChange={e=>setLogForm({...logForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
@@ -515,6 +541,49 @@ export default function App() {
                 <button className="btn-primary" onClick={submitLog} style={{ flex:2, background:"#4ECDC4", color:"#080A0E", borderRadius:12, padding:14, fontSize:13, fontWeight:700 }}>ENREGISTRER ✓</button>
               </div>
             </>)}
+
+            {/* EDIT */}
+            {modal.type === "edit" && editForm && (<>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
+                <div style={{ fontSize:22, fontWeight:800 }}>Modifier la séance</div>
+                <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(editForm.date, {day:"numeric", month:"long"})}</div>
+              </div>
+
+              {/* Type selector */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:9, color:"#555", letterSpacing:2, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>TYPE DE SÉANCE</div>
+                <div style={{ display:"flex", gap:6 }}>
+                  {Object.entries(TYPE_META).map(([type, tm]) => (
+                    <button key={type} className="type-btn" onClick={() => setEditForm({...editForm, type})}
+                      style={{ borderColor: editForm.type===type ? tm.color : "transparent", color: editForm.type===type ? tm.color : "#555", background: editForm.type===type ? tm.dark : "transparent" }}>
+                      <div style={{ fontSize:16, marginBottom:3 }}>{tm.icon}</div>
+                      <div style={{ fontSize:9, lineHeight:1.2 }}>{type}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <FormGrid>
+                <Field label="DISTANCE (km)"><input type="number" className="inp" value={editForm.dist} onChange={e=>setEditForm({...editForm,dist:e.target.value})} /></Field>
+                <Field label="DURÉE (min)"><input type="number" className="inp" value={editForm.dur} onChange={e=>setEditForm({...editForm,dur:e.target.value})} /></Field>
+                <Field label="FC MOY (bpm)"><input type="number" className="inp" value={editForm.hr||""} onChange={e=>setEditForm({...editForm,hr:e.target.value})} /></Field>
+                <Field label={`RPE · ${editForm.rpe}/10`}>
+                  <input type="range" min="1" max="10" value={editForm.rpe} onChange={e=>setEditForm({...editForm,rpe:e.target.value})} style={{ width:"100%", accentColor:"#FFE66D", marginTop:8 }} />
+                </Field>
+                <Field label="RESSENTI" full>
+                  <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+                    {FEELINGS.map((f,i) => <button key={i} onClick={()=>setEditForm({...editForm,feeling:String(i+1)})} style={{ fontSize:28, background:"transparent", border:`2px solid ${+editForm.feeling===i+1?"#FFE66D":"transparent"}`, borderRadius:10, padding:"4px 8px", cursor:"pointer" }}>{f}</button>)}
+                  </div>
+                </Field>
+                <Field label="NOTES" full><textarea className="inp" rows={2} value={editForm.notes||""} onChange={e=>setEditForm({...editForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
+              </FormGrid>
+
+              <div style={{ display:"flex", gap:10, marginTop:24 }}>
+                <button className="btn-ghost" onClick={() => setModal(null)} style={{ flex:1, borderRadius:12, padding:14, fontFamily:"'JetBrains Mono',monospace", fontSize:12 }}>ANNULER</button>
+                <button className="btn-primary" onClick={submitEdit} style={{ flex:2, background:"#FFE66D", color:"#080A0E", borderRadius:12, padding:14, fontSize:13, fontWeight:700 }}>SAUVEGARDER ✓</button>
+              </div>
+            </>)}
+
           </div>
         </div>
       )}
