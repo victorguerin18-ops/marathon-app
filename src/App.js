@@ -216,13 +216,20 @@ export default function App() {
     setPlanGenLoading(true);
     const config = cfg || planConfig;
     // Delete existing generated future sessions
+    // Delete ALL future generated sessions (cleans up old plan-xxx-N ids too)
     const toDelete = planned.filter(p=>p.generated && parseDate(p.date) > parseDate(TODAY_STR));
     for(const p of toDelete){ await deletePlanned(p.id); }
+    // Also delete any old-format generated sessions with id starting "plan-"
+    const oldFormat = planned.filter(p=>p.id && p.id.startsWith('plan-') && parseDate(p.date) > parseDate(TODAY_STR));
+    for(const p of oldFormat){ await deletePlanned(p.id); }
     // Generate new sessions
     const sessions = generatePlanFromConfig(config, planned.filter(p=>!p.generated));
     for(const s of sessions){ await savePlanned(s); }
     setPlanned(prev=>{
-      const kept = prev.filter(p=>!p.generated || parseDate(p.date) <= parseDate(TODAY_STR));
+      const kept = prev.filter(p=>
+        (!p.generated && !(p.id||'').startsWith('plan-')) ||
+        parseDate(p.date) <= parseDate(TODAY_STR)
+      );
       const ids = new Set(kept.map(p=>p.id));
       return [...kept, ...sessions.filter(s=>!ids.has(s.id))];
     });
@@ -242,6 +249,11 @@ export default function App() {
     const updated = {...planConfig, ...patch};
     setPlanConfig(updated);
     STORE.set("plan_config", updated);
+  }
+
+  async function deleteSession(id){
+    await deletePlanned(id);
+    setPlanned(prev=>prev.filter(p=>p.id!==id));
   }
 
   // ── Coach IA ───────────────────────────────────────────────────────
@@ -753,6 +765,13 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                             ?<div style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}</div><div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>SCORE</div></div>
                             :<button className="btn-ghost" onClick={()=>logSession(p)} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>LOG</button>
                           }
+                          {!linked&&(
+                            <button onClick={()=>{ if(window.confirm("Supprimer cette séance ?")) deleteSession(p.id); }} style={{
+                              background:"#FF6B6B18",border:"1px solid #FF6B6B33",color:"#FF6B6B88",
+                              cursor:"pointer",fontSize:11,padding:"4px 8px",borderRadius:6,
+                              fontFamily:"'JetBrains Mono',monospace",lineHeight:1,marginTop:2,
+                            }}>🗑</button>
+                          )}
                         </div>
                       </div>
                       {p.notes&&<div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:8,lineHeight:1.5}}>💬 {p.notes}</div>}

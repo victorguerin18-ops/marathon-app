@@ -153,10 +153,17 @@ export function defaultConfig(vma=15.24) {
       sl:    parseFloat((vmaToMinKm(vma,0.65)).toFixed(3)),
     },
     weekTemplate: [
-      // slot 0-3 for runDays[0-3]
+      // slot 0-3 for runDays[0-3] — semaine A
       {slot:0, type:"Endurance fondamentale"},
       {slot:1, type:"Fractionné / VMA"},
-      {slot:2, type:"Footing"},
+      {slot:2, type:"Endurance fondamentale"},
+      {slot:3, type:"Sortie longue"},
+    ],
+    weekTemplateB: [
+      // semaine B — alternance
+      {slot:0, type:"Endurance fondamentale"},
+      {slot:1, type:"Tempo / Seuil"},
+      {slot:2, type:"Endurance fondamentale"},
       {slot:3, type:"Sortie longue"},
     ],
   };
@@ -164,7 +171,7 @@ export function defaultConfig(vma=15.24) {
 
 // ── Plan generator (pure function) ───────────────────────────────────
 export function generatePlanFromConfig(config, existingPlanned=[]) {
-  const { runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate } = config;
+  const { runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate, weekTemplateB } = config;
   const intConf = INTENSITY[intensity];
   const vmaEx   = VMA_EXERCISES.find(e=>e.id===vmaExercise) || VMA_EXERCISES[0];
   const tempoEx = TEMPO_EXERCISES.find(e=>e.id===tempoExercise) || TEMPO_EXERCISES[0];
@@ -207,8 +214,9 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
     const m = intConf.mult * recMult;
     const msl = intConf.slMult * recMult;
 
-    // Map slot to type from weekTemplate
-    const tplSlot = weekTemplate.find(s=>s.slot===slotIdx);
+    // Map slot to type from weekTemplate A or B (alternating weeks)
+    const activeTpl = (weekNum % 2 === 0) ? weekTemplate : (weekTemplateB || weekTemplate);
+    const tplSlot = activeTpl.find(s=>s.slot===slotIdx);
     const sessionType = tplSlot?.type || ["Endurance fondamentale","Fractionné / VMA","Footing","Sortie longue"][slotIdx] || "Footing";
 
     let session = null;
@@ -434,24 +442,29 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
     .wiz-inp:focus{border-color:#444}
   `;
 
-  // Preview: first week
-  const previewWeek = useMemo(()=>{
-    const sessions=[];
+  // Preview: both weeks A and B
+  const previewWeeks = useMemo(()=>{
     const dow2name={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
-    cfg.runDays.forEach((dow,slotIdx)=>{
-      const tpl = cfg.weekTemplate.find(s=>s.slot===slotIdx);
-      const type = tpl?.type || "Footing";
-      const meta = {
-        "Endurance fondamentale":{dist:10,dur:Math.round(10*cfg.paces.ef),notes:`${fmtPace(cfg.paces.ef)}/km · Zone 2`},
-        "Fractionné / VMA":{dist:8, dur:Math.round(8*cfg.paces.ef+10),notes:VMA_EXERCISES.find(e=>e.id===cfg.vmaExercise)?.buildNotes(fmtPace(cfg.paces.vma),"base")||""},
-        "Tempo / Seuil":{dist:10,dur:Math.round(10*cfg.paces.tempo+10),notes:TEMPO_EXERCISES.find(e=>e.id===cfg.tempoExercise)?.buildNotes(fmtPace(cfg.paces.tempo))||""},
-        "Sortie longue":{dist:14,dur:Math.round(14*cfg.paces.sl),notes:`${fmtPace(cfg.paces.sl)}/km · Zone 2`},
-        "Footing":{dist:7,dur:Math.round(7*cfg.paces.ef+5),notes:"Récupération légère"},
+    const meta = {
+      "Endurance fondamentale":{dist:10,dur:Math.round(10*cfg.paces.ef),notes:`${fmtPace(cfg.paces.ef)}/km · Zone 2`},
+      "Fractionné / VMA":{dist:8, dur:Math.round(8*cfg.paces.ef+10),notes:VMA_EXERCISES.find(e=>e.id===cfg.vmaExercise)?.buildNotes(fmtPace(cfg.paces.vma),"base")||""},
+      "Tempo / Seuil":{dist:10,dur:Math.round(10*cfg.paces.tempo+10),notes:TEMPO_EXERCISES.find(e=>e.id===cfg.tempoExercise)?.buildNotes(fmtPace(cfg.paces.tempo))||""},
+      "Sortie longue":{dist:14,dur:Math.round(14*cfg.paces.sl),notes:`${fmtPace(cfg.paces.sl)}/km · Zone 2`},
+      "Footing":{dist:7,dur:Math.round(7*cfg.paces.ef+5),notes:"Récupération légère"},
+    };
+    return ["A","B"].map(week=>{
+      const tplKey = week==="A"?"weekTemplate":"weekTemplateB";
+      const tpl = cfg[tplKey] || cfg.weekTemplate;
+      return {
+        week,
+        sessions: cfg.runDays.map((dow,slotIdx)=>{
+          const slot = tpl.find(s=>s.slot===slotIdx);
+          const type = slot?.type || "Footing";
+          const m = meta[type]||meta["Footing"];
+          return {dow,dayName:dow2name[dow],type,...m,slotIdx};
+        })
       };
-      const m = meta[type]||meta["Footing"];
-      sessions.push({dow,dayName:dow2name[dow],type,...m,slotIdx});
     });
-    return sessions;
   },[cfg]);
 
   const TYPEMETA={
@@ -512,43 +525,63 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
         </div>
       )}
 
-      {/* ── STEP 1 : Semaine type ── */}
+      {/* ── STEP 1 : Semaine type A/B ── */}
       {step===1 && (
         <div>
-          <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:16,lineHeight:1.6}}>
-            Assigne un type de séance à chaque jour. L'appli fera progresser les distances/intensités automatiquement selon la phase.
+          <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:12,lineHeight:1.6}}>
+            Configure deux semaines types qui alternent (A une semaine, B la suivante). Parfait pour alterner VMA et Seuil.
           </div>
-          {cfg.runDays.map((dow,slotIdx)=>{
-            const dow2name={0:"Dimanche",1:"Lundi",2:"Mardi",3:"Mercredi",4:"Jeudi",5:"Vendredi",6:"Samedi"};
-            const tpl = cfg.weekTemplate.find(s=>s.slot===slotIdx);
-            const current = tpl?.type || "Footing";
-            const tm = TYPEMETA[current]||TYPEMETA["Footing"];
+
+          {["A","B"].map(week=>{
+            const isA = week==="A";
+            const tplKey = isA?"weekTemplate":"weekTemplateB";
+            const tpl = cfg[tplKey] || cfg.weekTemplate;
+            const weekColor = isA?"#00D2FF":"#C77DFF";
             return (
-              <div key={dow} style={{marginBottom:14}}>
-                <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>{dow2name[dow]}</div>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {SESSION_TYPES.map(type=>{
-                    const t=TYPEMETA[type]||TYPEMETA["Footing"];
-                    const isSel=current===type;
-                    return (
-                      <button key={type} onClick={()=>{
-                        const newTpl=cfg.weekTemplate.filter(s=>s.slot!==slotIdx);
-                        newTpl.push({slot:slotIdx,type});
-                        update({weekTemplate:newTpl});
-                      }} style={{
-                        border:`2px solid ${isSel?t.color:"#1C1F27"}`,
-                        background:isSel?t.color+"22":"transparent",
-                        color:isSel?t.color:"#555",
-                        borderRadius:8,padding:"6px 10px",
-                        fontSize:10,cursor:"pointer",
-                        fontFamily:"'JetBrains Mono',monospace",
-                      }}>
-                        {type.split(' ')[0]}
-                      </button>
-                    );
-                  })}
+              <div key={week} style={{marginBottom:20}}>
+                <div style={{
+                  fontSize:10,color:weekColor,letterSpacing:3,
+                  fontFamily:"'JetBrains Mono',monospace",marginBottom:10,
+                  padding:"6px 12px",background:weekColor+"11",
+                  borderRadius:8,border:`1px solid ${weekColor}33`,
+                  display:"inline-block"
+                }}>
+                  SEMAINE {week} {isA?"(semaines impaires)":"(semaines paires)"}
                 </div>
-                <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{tm.icon} {current}</div>
+                {cfg.runDays.map((dow,slotIdx)=>{
+                  const dow2name={0:"Dimanche",1:"Lundi",2:"Mardi",3:"Mercredi",4:"Jeudi",5:"Vendredi",6:"Samedi"};
+                  const slot = tpl.find(s=>s.slot===slotIdx);
+                  const current = slot?.type || "Footing";
+                  const tm = TYPEMETA[current]||TYPEMETA["Footing"];
+                  return (
+                    <div key={dow} style={{marginBottom:10}}>
+                      <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{dow2name[dow]}</div>
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        {SESSION_TYPES.map(type=>{
+                          const t=TYPEMETA[type]||TYPEMETA["Footing"];
+                          const isSel=current===type;
+                          return (
+                            <button key={type} onClick={()=>{
+                              const newTpl=tpl.filter(s=>s.slot!==slotIdx);
+                              newTpl.push({slot:slotIdx,type});
+                              update({[tplKey]:newTpl});
+                            }} style={{
+                              border:`2px solid ${isSel?t.color:"#1C1F27"}`,
+                              background:isSel?t.color+"22":"transparent",
+                              color:isSel?t.color:"#555",
+                              borderRadius:8,padding:"5px 8px",
+                              fontSize:9,cursor:"pointer",
+                              fontFamily:"'JetBrains Mono',monospace",
+                            }}>
+                              {type.split(' ')[0]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{tm.icon} {current}</div>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -657,7 +690,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
       {step===5 && (
         <div>
           <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:16,lineHeight:1.6}}>
-            Voici ta semaine type. L'appli va la répéter en faisant progresser les distances et l'intensité sur 32 semaines.
+            Aperçu de tes deux semaines types. Elles alternent : semaine A (impaires), semaine B (paires).
           </div>
 
           {/* Config recap */}
@@ -673,17 +706,26 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
             </span>
           </div>
 
-          {/* Week preview */}
-          {previewWeek.map(s=>{
-            const tm=TYPEMETA[s.type]||TYPEMETA["Footing"];
+          {/* Week A/B preview */}
+          {previewWeeks.map(({week,sessions})=>{
+            const wColor = week==="A"?"#00D2FF":"#C77DFF";
             return (
-              <div key={s.dow} style={{padding:"14px 16px",marginBottom:8,background:"#080A0E",border:`1px solid ${tm.color}22`,borderLeft:`3px solid ${tm.color}`,borderRadius:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{s.dayName}</div>
-                  <div style={{fontSize:12,fontWeight:700}}>{s.dist} km · ~{s.dur} min</div>
+              <div key={week} style={{marginBottom:16}}>
+                <div style={{fontSize:10,color:wColor,letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block"}}>
+                  SEMAINE {week}
                 </div>
-                <div style={{fontSize:11,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{tm.icon} {s.type}</div>
-                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.5}}>{s.notes}</div>
+                {sessions.map(s=>{
+                  const tm=TYPEMETA[s.type]||TYPEMETA["Footing"];
+                  return (
+                    <div key={s.dow} style={{padding:"12px 14px",marginBottom:6,background:"#080A0E",border:`1px solid ${tm.color}22`,borderLeft:`3px solid ${tm.color}`,borderRadius:10}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{s.dayName}</div>
+                        <div style={{fontSize:12,fontWeight:700}}>{s.dist} km · ~{s.dur} min</div>
+                      </div>
+                      <div style={{fontSize:11,color:tm.color,fontFamily:"'JetBrains Mono',monospace"}}>{tm.icon} {s.type}</div>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -767,34 +809,44 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
         })}
       </div>
 
-      {/* Semaine type */}
-      <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>SEMAINE TYPE</div>
-      {config.runDays.map((dow,slotIdx)=>{
-        const dow2name={0:"Dimanche",1:"Lundi",2:"Mardi",3:"Mercredi",4:"Jeudi",5:"Vendredi",6:"Samedi"};
-        const tpl=config.weekTemplate.find(s=>s.slot===slotIdx);
-        const current=tpl?.type||"Footing";
-        const tm=TYPEMETA[current]||TYPEMETA["Footing"];
+      {/* Semaine type A/B */}
+      <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>SEMAINES TYPE (A/B ALTERNÉES)</div>
+      {["A","B"].map(week=>{
+        const isA=week==="A";
+        const tplKey=isA?"weekTemplate":"weekTemplateB";
+        const tpl=config[tplKey]||config.weekTemplate;
+        const wColor=isA?"#00D2FF":"#C77DFF";
         return (
-          <div key={dow} style={{marginBottom:12}}>
-            <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>{dow2name[dow]}</div>
-            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {SESSION_TYPES.map(type=>{
-                const t=TYPEMETA[type]||TYPEMETA["Footing"];
-                const isSel=current===type;
-                return (
-                  <button key={type} onClick={()=>{
-                    const newTpl=config.weekTemplate.filter(s=>s.slot!==slotIdx);
-                    newTpl.push({slot:slotIdx,type});
-                    onUpdate({weekTemplate:newTpl});
-                  }} style={{
-                    border:`2px solid ${isSel?t.color:"#1C1F27"}`,
-                    background:isSel?t.color+"22":"transparent",
-                    color:isSel?t.color:"#555",
-                    borderRadius:8,padding:"5px 8px",
-                    fontSize:9,cursor:"pointer",
-                    fontFamily:"'JetBrains Mono',monospace",
-                  }}>{type.split(' ')[0]}</button>
-                );
+          <div key={week} style={{marginBottom:16}}>
+            <div style={{fontSize:10,color:wColor,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block",letterSpacing:2}}>
+              SEM. {week} {isA?"(impaires)":"(paires)"}
+            </div>
+            {config.runDays.map((dow,slotIdx)=>{
+              const dow2name={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
+              const slot=tpl.find(s=>s.slot===slotIdx);
+              const current=slot?.type||"Footing";
+              const tm=TYPEMETA[current]||TYPEMETA["Footing"];
+              return (
+                <div key={dow} style={{marginBottom:10}}>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{dow2name[dow]}</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {SESSION_TYPES.map(type=>{
+                      const t=TYPEMETA[type]||TYPEMETA["Footing"];
+                      const isSel=current===type;
+                      return (
+                        <button key={type} onClick={()=>{
+                          const newTpl=tpl.filter(s=>s.slot!==slotIdx);
+                          newTpl.push({slot:slotIdx,type});
+                          onUpdate({[tplKey]:newTpl});
+                        }} style={{
+                          border:`2px solid ${isSel?t.color:"#1C1F27"}`,
+                          background:isSel?t.color+"22":"transparent",
+                          color:isSel?t.color:"#555",
+                          borderRadius:8,padding:"5px 8px",
+                          fontSize:9,cursor:"pointer",
+                          fontFamily:"'JetBrains Mono',monospace",
+                        }}>{type.split(' ')[0]}</button>
+                      );
               })}
             </div>
             <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{tm.icon} {current}</div>
