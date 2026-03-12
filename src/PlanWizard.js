@@ -532,7 +532,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
             Combien de semaines veux-tu générer ? Idéal pour cibler une phase précise (maintien, transition, prépa…).
           </div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:20,marginBottom:24}}>
-            <button className="weeks-btn" onClick={()=>update({nbWeeks:Math.max(1,(cfg.nbWeeks||16)-1})}>−</button>
+            <button className="weeks-btn" onClick={()=>{ update({nbWeeks:Math.max(1,(cfg.nbWeeks||16)-1)}); }}>−</button>
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:48,fontWeight:800,color:"#00D2FF",fontFamily:"'Syne',sans-serif",lineHeight:1}}>{cfg.nbWeeks||16}</div>
               <div style={{fontSize:12,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>semaines</div>
