@@ -8,11 +8,12 @@ const DAYS_LEFT = Math.ceil((MARATHON - TODAY) / 86400000);
 const WEEKS_LEFT = Math.floor(DAYS_LEFT / 7);
 
 const TYPE_META = {
-  "Récupération": { color: "#4ECDC4", dark: "#0d2b2a", icon: "○" },
-  "Endurance":    { color: "#FFE66D", dark: "#2b2700", icon: "◈" },
-  "Fractionné":   { color: "#FF6B6B", dark: "#2b0d0d", icon: "▲▲" },
-  "Sortie longue":{ color: "#C77DFF", dark: "#1e0d2b", icon: "◈◈◈" },
-  "Tempo":        { color: "#FF9F43", dark: "#2b1a00", icon: "◇" },
+  "Footing":               { color: "#A8DADC", dark: "#0d1f20", icon: "〜", desc: "Run libre, pas structuré" },
+  "Endurance fondamentale":{ color: "#FFE66D", dark: "#2b2700", icon: "◈", desc: "Zone 2, FC ≤ 150 bpm" },
+  "Tempo / Seuil":         { color: "#FF9F43", dark: "#2b1a00", icon: "◇", desc: "Allure 10km / seuil" },
+  "Fractionné / VMA":      { color: "#FF6B6B", dark: "#2b0d0d", icon: "▲▲", desc: "Intervalles intenses" },
+  "Sortie longue":         { color: "#C77DFF", dark: "#1e0d2b", icon: "◈◈◈", desc: "Distance maximale" },
+  "Course":                { color: "#FFD700", dark: "#2b2200", icon: "🏅", desc: "Compétition chronométrée" },
 };
 
 const FEELINGS = ["😣","😕","😐","🙂","😄"];
@@ -61,6 +62,7 @@ export default function App() {
   const [stravaLoading, setStravaLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
   const todayStr = TODAY.toISOString().slice(0,10);
+  const [editForm, setEditForm] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -123,19 +125,26 @@ export default function App() {
   const totalKm  = done.reduce((s,r) => s + r.dist, 0);
 
   const typeVariety = useMemo(() => {
-    const last4wk = done.filter(r => { const d = new Date(r.date); const c = new Date(TODAY); c.setDate(c.getDate()-28); return d >= c; });
-    const counts = {}; last4wk.forEach(r => { counts[r.type] = (counts[r.type]||0) + 1; }); return counts;
+    const last4wk = done.filter(r => {
+      const [y,m,day] = r.date.split('-');
+      const d = new Date(+y,+m-1,+day);
+      const c = new Date(TODAY); c.setDate(c.getDate()-28);
+      return d >= c;
+    });
+    const counts = {};
+    last4wk.forEach(r => { counts[r.type] = (counts[r.type]||0) + 1; });
+    return counts;
   }, [done]);
 
   const paceProgression = useMemo(() => {
-    return [...done].filter(r => r.type === "Endurance" && r.dist > 5)
+    return [...done]
+      .filter(r => (r.type === "Endurance fondamentale" || r.type === "Endurance") && r.dist > 5)
       .sort((a,b) => a.date.localeCompare(b.date))
       .map(r => ({ date: r.date, pace: (r.dur * 60) / r.dist }));
   }, [done]);
 
-  const [planForm, setPlanForm] = useState({ date:todayStr, type:"Endurance", targetDist:"", targetDur:"", targetHR:"", notes:"" });
-  const [logForm,  setLogForm]  = useState({ date:todayStr, plannedId:"", type:"Endurance", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
-  const [editForm, setEditForm] = useState(null);
+  const [planForm, setPlanForm] = useState({ date:todayStr, type:"Endurance fondamentale", targetDist:"", targetDur:"", targetHR:"", notes:"" });
+  const [logForm,  setLogForm]  = useState({ date:todayStr, plannedId:"", type:"Endurance fondamentale", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
 
   async function addPlanned() {
     const p = { id:"p"+Date.now(), ...planForm, targetDist:+planForm.targetDist, targetDur:+planForm.targetDur, targetHR:planForm.targetHR?+planForm.targetHR:null };
@@ -145,7 +154,7 @@ export default function App() {
   function logSession(prefill = null) {
     setLogForm(prefill
       ? { date:prefill.date, plannedId:prefill.id, type:prefill.type, dist:String(prefill.targetDist), dur:String(prefill.targetDur), hr:prefill.targetHR?String(prefill.targetHR):"", rpe:"6", feeling:"3", notes:"" }
-      : { date:todayStr, plannedId:"", type:"Endurance", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
+      : { date:todayStr, plannedId:"", type:"Endurance fondamentale", dist:"", dur:"", hr:"", rpe:"6", feeling:"3", notes:"" });
     setModal({ type:"log" });
   }
 
@@ -167,7 +176,7 @@ export default function App() {
   }
 
   const acwrStatus = acwr > 1.3 ? { label:"RISQUE ÉLEVÉ", color:"#FF6B6B" } : acwr > 1.15 ? { label:"CHARGE MODÉRÉE", color:"#FF9F43" } : { label:"OPTIMAL", color:"#4ECDC4" };
-  const varietyScore = Object.keys(typeVariety).length;
+  const varietyScore = Object.keys(typeVariety).filter(t => t !== "Footing").length;
   const todayPlanned = planned.filter(p => p.date === todayStr);
   const upcoming = planned.filter(p => isFuture(p.date)).sort((a,b) => a.date.localeCompare(b.date));
 
@@ -184,8 +193,6 @@ export default function App() {
     .btn-primary:hover{opacity:.85;transform:scale(.98)}
     .btn-ghost{transition:all .2s;background:transparent;border:1px solid #222;cursor:pointer;font-family:inherit;color:#888}
     .btn-ghost:hover{border-color:#444;color:#ccc}
-    .btn-danger{transition:all .2s;background:transparent;border:1px solid #FF6B6B33;cursor:pointer;font-family:inherit;color:#FF6B6B}
-    .btn-danger:hover{background:#FF6B6B22}
     .inp{background:#080A0E;border:1px solid #1C1F27;color:#E8E4DC;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;width:100%;outline:none;transition:border .2s}
     .inp:focus{border-color:#444}
     @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
@@ -197,7 +204,7 @@ export default function App() {
     select option{background:#0F1117}
     @keyframes spin{to{transform:rotate(360deg)}}
     .spin{animation:spin 1s linear infinite;display:inline-block}
-    .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 6px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:10px;flex:1;text-align:center}
+    .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 4px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:9px;flex:1;text-align:center;line-height:1.3}
     .type-btn:hover{opacity:.8}
   `;
 
@@ -213,6 +220,7 @@ export default function App() {
     <div style={{ minHeight:"100vh", background:"#080A0E", fontFamily:"'Syne',sans-serif", color:"#E8E4DC", maxWidth:480, margin:"0 auto", paddingBottom:80 }}>
       <style>{css}</style>
 
+      {/* TOP BAR */}
       <div style={{ padding:"20px 20px 0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
           <div style={{ fontSize:11, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>MARATHON · OCT 2026</div>
@@ -227,12 +235,14 @@ export default function App() {
         </div>
       </div>
 
+      {/* PROGRESS BAR */}
       <div style={{ padding:"12px 20px 0" }}>
         <div style={{ height:3, background:"#1C1F27", borderRadius:2 }}>
           <div style={{ height:3, width:`${Math.round((32-WEEKS_LEFT)/32*100)}%`, background:"linear-gradient(90deg,#4ECDC4,#FFE66D)", borderRadius:2 }} />
         </div>
       </div>
 
+      {/* STRAVA */}
       <div style={{ padding:"12px 20px 0" }}>
         {!stravaConnected ? (
           <button onClick={stravaLogin} style={{ width:"100%", background:"#FC4C02", border:"none", borderRadius:10, padding:"12px", color:"#fff", fontSize:13, fontWeight:700, fontFamily:"'JetBrains Mono',monospace", cursor:"pointer" }}>
@@ -251,6 +261,7 @@ export default function App() {
         )}
       </div>
 
+      {/* NAV */}
       <div style={{ display:"flex", gap:4, padding:"16px 20px 0" }}>
         {[["today","AUJOURD'HUI"],["plan","PLAN"],["analyse","ANALYSE"],["journal","JOURNAL"]].map(([v,l]) => (
           <button key={v} className="nav-tab" onClick={() => setView(v)}
@@ -262,6 +273,7 @@ export default function App() {
 
       <div style={{ padding:"20px 20px 0" }}>
 
+        {/* TODAY */}
         {view === "today" && (
           <div className="fade-up">
             {todayPlanned.length === 0 && (
@@ -272,7 +284,7 @@ export default function App() {
               </div>
             )}
             {todayPlanned.map(p => {
-              const tm = TYPE_META[p.type] || TYPE_META["Endurance"];
+              const tm = TYPE_META[p.type] || TYPE_META["Footing"];
               const linked = done.find(d => d.plannedId === p.id);
               const score = linked ? scoreSession(p, linked) : null;
               return (
@@ -282,6 +294,7 @@ export default function App() {
                       <span className="pill" style={{ background:tm.dark, color:tm.color, marginBottom:8 }}>{tm.icon} {p.type}</span>
                       <div style={{ fontSize:22, fontWeight:800 }}>{p.targetDist} km</div>
                       <div style={{ fontSize:12, color:"#555", fontFamily:"'JetBrains Mono',monospace", marginTop:2 }}>~{p.targetDur} min · {p.targetHR ? `FC ${p.targetHR} bpm` : "FC libre"}</div>
+                      <div style={{ fontSize:11, color:tm.color, fontFamily:"'JetBrains Mono',monospace", marginTop:4 }}>{tm.desc}</div>
                     </div>
                     {score !== null && (
                       <div style={{ textAlign:"center" }}>
@@ -316,7 +329,7 @@ export default function App() {
               <div style={{ marginTop:8 }}>
                 <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>PROCHAINES SÉANCES</div>
                 {upcoming.slice(0,3).map(p => {
-                  const tm = TYPE_META[p.type] || TYPE_META["Endurance"];
+                  const tm = TYPE_META[p.type] || TYPE_META["Footing"];
                   return (
                     <div key={p.id} className="card card-hover" style={{ padding:"14px 16px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}>
                       <div style={{ width:40, height:40, borderRadius:10, background:tm.dark, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{tm.icon}</div>
@@ -347,6 +360,7 @@ export default function App() {
           </div>
         )}
 
+        {/* PLAN */}
         {view === "plan" && (
           <div className="fade-up">
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
@@ -354,7 +368,7 @@ export default function App() {
               <button className="btn-ghost" onClick={() => setModal({type:"plan"})} style={{ borderRadius:8, padding:"6px 12px", fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>+ AJOUTER</button>
             </div>
             {[...planned].sort((a,b) => a.date.localeCompare(b.date)).map(p => {
-              const tm = TYPE_META[p.type] || TYPE_META["Endurance"];
+              const tm = TYPE_META[p.type] || TYPE_META["Footing"];
               const linked = done.find(d => d.plannedId === p.id);
               const score = linked ? scoreSession(p,linked) : null;
               const past = isPast(p.date); const today = isToday(p.date);
@@ -383,6 +397,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ANALYSE */}
         {view === "analyse" && (
           <div className="fade-up">
             <div className="card" style={{ padding:22, marginBottom:14, borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27" }}>
@@ -405,27 +420,32 @@ export default function App() {
                 {acwr>1.3?"⚠ Risque de blessure élevé. Réduis la charge de 20-30%.":acwr>1.15?"△ Charge modérée. Surveille ta récupération.":"✓ Tu es dans la zone optimale. Continue !"}
               </div>
             </div>
+
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>VOLUME HEBDOMADAIRE</div>
               <VolumeChart weeks={weeklyVol} />
             </div>
+
             <div className="card" style={{ padding:22, marginBottom:14 }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE</div>
+              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE (endurance fondamentale)</div>
               <PaceChart data={paceProgression} />
             </div>
+
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VARIÉTÉ (4 sem.)</div>
-                <span style={{ fontSize:11, color:varietyScore>=4?"#4ECDC4":varietyScore>=3?"#FFE66D":"#FF6B6B", fontFamily:"'JetBrains Mono',monospace" }}>{varietyScore>=4?"EXCELLENTE":varietyScore>=3?"BONNE":"À AMÉLIORER"}</span>
+                <span style={{ fontSize:11, color:varietyScore>=4?"#4ECDC4":varietyScore>=3?"#FFE66D":"#FF6B6B", fontFamily:"'JetBrains Mono',monospace" }}>
+                  {varietyScore>=4?"EXCELLENTE":varietyScore>=3?"BONNE":"À AMÉLIORER"}
+                </span>
               </div>
-              {Object.entries(typeVariety).map(([type, count]) => {
-                const tm = TYPE_META[type] || TYPE_META["Endurance"];
+              {Object.entries(typeVariety).sort((a,b) => b[1]-a[1]).map(([type, count]) => {
+                const tm = TYPE_META[type] || TYPE_META["Footing"];
                 const total = Object.values(typeVariety).reduce((s,v)=>s+v,0);
                 return (
                   <div key={type} style={{ marginBottom:10 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:12 }}>
                       <span style={{ color:tm.color }}>{tm.icon} {type}</span>
-                      <span style={{ color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{count} séances</span>
+                      <span style={{ color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{count} séances · {Math.round(count/total*100)}%</span>
                     </div>
                     <div style={{ height:5, background:"#1C1F27", borderRadius:3 }}>
                       <div style={{ height:5, width:`${count/total*100}%`, background:tm.color, borderRadius:3 }} />
@@ -433,10 +453,22 @@ export default function App() {
                   </div>
                 );
               })}
+              {/* Conseil variété */}
+              {(() => {
+                const types = Object.keys(typeVariety);
+                const missing = ["Endurance fondamentale","Fractionné / VMA","Sortie longue"].filter(t => !types.includes(t));
+                if (missing.length > 0) return (
+                  <div style={{ marginTop:12, padding:"10px 12px", background:"#2b1a0033", border:"1px solid #FF9F4333", borderRadius:8, fontSize:11, color:"#FF9F43", fontFamily:"'JetBrains Mono',monospace" }}>
+                    💡 Manque : {missing.join(", ")}
+                  </div>
+                );
+                return null;
+              })()}
             </div>
           </div>
         )}
 
+        {/* JOURNAL */}
         {view === "journal" && (
           <div className="fade-up">
             <div style={{ fontSize:11, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:14 }}>
@@ -444,7 +476,7 @@ export default function App() {
               {done.filter(d=>d.fromStrava).length > 0 && <span style={{ color:"#FC4C02", marginLeft:8 }}>· {done.filter(d=>d.fromStrava).length} STRAVA</span>}
             </div>
             {[...done].sort((a,b) => b.date.localeCompare(a.date)).map(r => {
-              const tm = TYPE_META[r.type] || TYPE_META["Endurance"];
+              const tm = TYPE_META[r.type] || TYPE_META["Footing"];
               const linked = planned.find(p => p.id === r.plannedId);
               const score = linked ? scoreSession(linked, r) : null;
               return (
@@ -452,13 +484,11 @@ export default function App() {
                   <div style={{ display:"flex", gap:12, alignItems:"center" }}>
                     <div style={{ width:44, height:44, borderRadius:10, background:tm.dark, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{tm.icon}</div>
                     <div style={{ flex:1 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
                         <span style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(r.date,{weekday:"long",day:"numeric",month:"long"})}</span>
                         {r.fromStrava && <span style={{ fontSize:9, color:"#FC4C02", fontFamily:"'JetBrains Mono',monospace" }}>STRAVA</span>}
                       </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span className="pill" style={{ background:tm.dark, color:tm.color }}>{tm.icon} {r.type}</span>
-                      </div>
+                      <span className="pill" style={{ background:tm.dark, color:tm.color }}>{tm.icon} {r.type}</span>
                       <div style={{ display:"flex", gap:12, marginTop:6, flexWrap:"wrap" }}>
                         {[`${r.dist} km`,`${r.dur} min`,pace(r.dist,r.dur)+"/km",r.hr?`${r.hr} bpm`:""].filter(Boolean).map(v => (
                           <span key={v} style={{ fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace" }}>{v}</span>
@@ -499,16 +529,27 @@ export default function App() {
         <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.85)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(6px)" }}>
           <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto" }}>
 
-            {/* PLAN */}
+            {/* PLANIFIER */}
             {modal.type === "plan" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Planifier une séance</div>
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:9, color:"#555", letterSpacing:2, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>TYPE</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {Object.entries(TYPE_META).map(([type, tm]) => (
+                    <button key={type} className="type-btn" onClick={() => setPlanForm({...planForm, type})}
+                      style={{ borderColor:planForm.type===type?tm.color:"transparent", color:planForm.type===type?tm.color:"#555", background:planForm.type===type?tm.dark:"transparent", minWidth:70 }}>
+                      <div style={{ fontSize:16, marginBottom:3 }}>{tm.icon}</div>
+                      <div>{type}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <FormGrid>
                 <Field label="DATE"><input type="date" className="inp" value={planForm.date} onChange={e=>setPlanForm({...planForm,date:e.target.value})} /></Field>
-                <Field label="TYPE"><select className="inp" value={planForm.type} onChange={e=>setPlanForm({...planForm,type:e.target.value})}>{Object.keys(TYPE_META).map(t=><option key={t}>{t}</option>)}</select></Field>
                 <Field label="DISTANCE CIBLE (km)"><input type="number" className="inp" placeholder="10" value={planForm.targetDist} onChange={e=>setPlanForm({...planForm,targetDist:e.target.value})} /></Field>
                 <Field label="DURÉE CIBLE (min)"><input type="number" className="inp" placeholder="65" value={planForm.targetDur} onChange={e=>setPlanForm({...planForm,targetDur:e.target.value})} /></Field>
                 <Field label="FC CIBLE (bpm)"><input type="number" className="inp" placeholder="145" value={planForm.targetHR} onChange={e=>setPlanForm({...planForm,targetHR:e.target.value})} /></Field>
-                <Field label="NOTES" full><textarea className="inp" rows={3} placeholder="Description..." value={planForm.notes} onChange={e=>setPlanForm({...planForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
+                <Field label="NOTES" full><textarea className="inp" rows={3} placeholder="Description, objectifs..." value={planForm.notes} onChange={e=>setPlanForm({...planForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
               </FormGrid>
               <div style={{ display:"flex", gap:10, marginTop:24 }}>
                 <button className="btn-ghost" onClick={() => setModal(null)} style={{ flex:1, borderRadius:12, padding:14, fontFamily:"'JetBrains Mono',monospace", fontSize:12 }}>ANNULER</button>
@@ -519,9 +560,20 @@ export default function App() {
             {/* LOG */}
             {modal.type === "log" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Enregistrer une séance</div>
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:9, color:"#555", letterSpacing:2, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>TYPE</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {Object.entries(TYPE_META).map(([type, tm]) => (
+                    <button key={type} className="type-btn" onClick={() => setLogForm({...logForm, type})}
+                      style={{ borderColor:logForm.type===type?tm.color:"transparent", color:logForm.type===type?tm.color:"#555", background:logForm.type===type?tm.dark:"transparent", minWidth:70 }}>
+                      <div style={{ fontSize:16, marginBottom:3 }}>{tm.icon}</div>
+                      <div>{type}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <FormGrid>
                 <Field label="DATE"><input type="date" className="inp" value={logForm.date} onChange={e=>setLogForm({...logForm,date:e.target.value})} /></Field>
-                <Field label="TYPE"><select className="inp" value={logForm.type} onChange={e=>setLogForm({...logForm,type:e.target.value})}>{Object.keys(TYPE_META).map(t=><option key={t}>{t}</option>)}</select></Field>
                 <Field label="DISTANCE (km)"><input type="number" className="inp" placeholder="10.5" value={logForm.dist} onChange={e=>setLogForm({...logForm,dist:e.target.value})} /></Field>
                 <Field label="DURÉE (min)"><input type="number" className="inp" placeholder="68" value={logForm.dur} onChange={e=>setLogForm({...logForm,dur:e.target.value})} /></Field>
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" placeholder="145" value={logForm.hr} onChange={e=>setLogForm({...logForm,hr:e.target.value})} /></Field>
@@ -548,21 +600,18 @@ export default function App() {
                 <div style={{ fontSize:22, fontWeight:800 }}>Modifier la séance</div>
                 <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(editForm.date, {day:"numeric", month:"long"})}</div>
               </div>
-
-              {/* Type selector */}
               <div style={{ marginBottom:16 }}>
                 <div style={{ fontSize:9, color:"#555", letterSpacing:2, fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>TYPE DE SÉANCE</div>
-                <div style={{ display:"flex", gap:6 }}>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                   {Object.entries(TYPE_META).map(([type, tm]) => (
                     <button key={type} className="type-btn" onClick={() => setEditForm({...editForm, type})}
-                      style={{ borderColor: editForm.type===type ? tm.color : "transparent", color: editForm.type===type ? tm.color : "#555", background: editForm.type===type ? tm.dark : "transparent" }}>
+                      style={{ borderColor:editForm.type===type?tm.color:"transparent", color:editForm.type===type?tm.color:"#555", background:editForm.type===type?tm.dark:"transparent", minWidth:70 }}>
                       <div style={{ fontSize:16, marginBottom:3 }}>{tm.icon}</div>
-                      <div style={{ fontSize:9, lineHeight:1.2 }}>{type}</div>
+                      <div>{type}</div>
                     </button>
                   ))}
                 </div>
               </div>
-
               <FormGrid>
                 <Field label="DISTANCE (km)"><input type="number" className="inp" value={editForm.dist} onChange={e=>setEditForm({...editForm,dist:e.target.value})} /></Field>
                 <Field label="DURÉE (min)"><input type="number" className="inp" value={editForm.dur} onChange={e=>setEditForm({...editForm,dur:e.target.value})} /></Field>
@@ -577,13 +626,11 @@ export default function App() {
                 </Field>
                 <Field label="NOTES" full><textarea className="inp" rows={2} value={editForm.notes||""} onChange={e=>setEditForm({...editForm,notes:e.target.value})} style={{resize:"none"}} /></Field>
               </FormGrid>
-
               <div style={{ display:"flex", gap:10, marginTop:24 }}>
                 <button className="btn-ghost" onClick={() => setModal(null)} style={{ flex:1, borderRadius:12, padding:14, fontFamily:"'JetBrains Mono',monospace", fontSize:12 }}>ANNULER</button>
                 <button className="btn-primary" onClick={submitEdit} style={{ flex:2, background:"#FFE66D", color:"#080A0E", borderRadius:12, padding:14, fontSize:13, fontWeight:700 }}>SAUVEGARDER ✓</button>
               </div>
             </>)}
-
           </div>
         </div>
       )}

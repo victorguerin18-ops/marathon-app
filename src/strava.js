@@ -44,28 +44,36 @@ export async function fetchActivities(accessToken) {
 function guessType(a) {
   const dist = a.distance / 1000;
   const hr = a.average_heartrate;
-  const wt = a.workout_type;
+  const wt = a.workout_type; // 0=normal, 1=race, 2=long run, 3=workout
 
-  if (wt === 1) return 'Fractionné';
+  // Compétition
+  if (wt === 1) return 'Course';
+
+  // Long run tagué Strava
   if (wt === 2) return 'Sortie longue';
-  if (wt === 3) return 'Fractionné';
 
+  // Workout intense tagué Strava
+  if (wt === 3) return hr && hr >= 160 ? 'Fractionné / VMA' : 'Tempo / Seuil';
+
+  // Longue distance → sortie longue
   if (dist >= 18) return 'Sortie longue';
 
+  // Détection par FC si disponible
   if (hr) {
-    if (hr < 133) return 'Récupération';
-    if (hr < 148) return 'Endurance';
-    if (hr < 160) return 'Tempo';
-    return 'Fractionné';
+    if (hr < 140) return 'Footing';
+    if (hr < 152) return 'Endurance fondamentale';
+    if (hr < 163) return 'Tempo / Seuil';
+    return 'Fractionné / VMA';
   }
 
-  if (dist < 6) return 'Récupération';
-  if (dist < 15) return 'Endurance';
+  // Fallback distance seule
+  if (dist < 5) return 'Footing';
+  if (dist < 15) return 'Endurance fondamentale';
   return 'Sortie longue';
 }
 
 function estimateRPE(a) {
-  if (!a.average_heartrate) return 6;
+  if (!a.average_heartrate) return 5;
   const hr = a.average_heartrate;
   if (hr < 130) return 3;
   if (hr < 138) return 4;
