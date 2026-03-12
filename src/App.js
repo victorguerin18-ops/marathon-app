@@ -656,7 +656,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                       <div style={{fontSize:16,fontWeight:800}}>VMA {planConfig.vma} km/h · {planConfig.intensity === "soft" ? "Douce" : planConfig.intensity === "ambitious" ? "Ambitieuse" : "Standard"}</div>
                       <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{planned.filter(p=>p.generated).length} séances générées · {planned.filter(p=>p.generated&&parseDate(p.date)>parseDate(TODAY_STR)).length} restantes</div>
                     </div>
-                    <div style={{display:"flex",gap:8"}}>
+                    <div style={{display:"flex",gap:8}}>
                       <button onClick={()=>setShowSettings(true)} className="btn-ghost" style={{borderRadius:10,padding:"8px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>⚙ RÉGLAGES</button>
                     </div>
                   </div>
