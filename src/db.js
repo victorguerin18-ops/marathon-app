@@ -23,6 +23,7 @@ export async function savePlanned(p) {
     id: p.id, date: p.date, type: p.type,
     target_dist: p.targetDist, target_dur: p.targetDur,
     target_hr: p.targetHR, notes: p.notes,
+    generated: p.generated || false,
   });
   if (error) console.error(error);
 }
