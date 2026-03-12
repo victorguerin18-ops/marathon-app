@@ -537,7 +537,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
               <div style={{fontSize:48,fontWeight:800,color:"#00D2FF",fontFamily:"'Syne',sans-serif",lineHeight:1}}>{cfg.nbWeeks||16}</div>
               <div style={{fontSize:12,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>semaines</div>
             </div>
-            <button className="weeks-btn" onClick={()=>update({nbWeeks:Math.min(32,(cfg.nbWeeks||16)+1})}>+</button>
+            <button className="weeks-btn" onClick={()=>{ update({nbWeeks:Math.min(32,(cfg.nbWeeks||16)+1)}); }}>+</button>
           </div>
 
           {/* Presets rapides */}
