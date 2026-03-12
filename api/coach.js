@@ -6,15 +6,12 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "Clé API manquante." });
 
   try {
-    // Parse body manuellement si nécessaire
     let body = req.body;
-    if (typeof body === "string") {
-      body = JSON.parse(body);
-    }
+    if (typeof body === "string") body = JSON.parse(body);
 
     const { messages, max_tokens = 1000 } = body;
 
@@ -22,15 +19,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "messages manquants ou invalides" });
     }
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "llama-3.3-70b-versatile",
         max_tokens,
         messages,
       }),
@@ -39,17 +35,19 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || "Erreur Anthropic" });
+      return res.status(response.status).json({ error: data.error?.message || "Erreur Groq" });
     }
 
-    return res.status(200).json(data);
+    // Adapter le format Groq → format Anthropic attendu par App.js
+    return res.status(200).json({
+      content: [{ type: "text", text: data.choices?.[0]?.message?.content || "Pas de réponse." }]
+    });
+
   } catch (err) {
     return res.status(500).json({ error: "Erreur serveur : " + err.message });
   }
 }
 
 export const config = {
-  api: {
-    bodyParser: true,
-  },
+  api: { bodyParser: true },
 };
