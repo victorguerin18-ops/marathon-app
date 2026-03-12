@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities } from './strava';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone } from './db';
 import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace } from './PlanWizard';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ const VMA_RATIO = {
   "Endurance fondamentale": { ratio: 0.70, label: "EF", color: "#6BF178", desc: "~70% VMA", weight: 2 },
   "Sortie longue":          { ratio: 0.72, label: "SL", color: "#C77DFF", desc: "~72% VMA", weight: 2 },
   "Tempo / Seuil":          { ratio: 0.86, label: "SEUIL", color: "#FF9F43", desc: "~86% VMA", weight: 3 },
-  "Fractionné / VMA":       { ratio: 0.98, label: "VMA", color: "#FF6B6B", desc: "~98% VMA", weight: 4 },
+  "Fractionné / VMA":       { ratio: 0.98, label: "VMA", color: "#FF6B6B", desc: "~98% VMA (exclu)", weight: 4, exclude: true },
 };
 
 function computeVMA(doneList) {
@@ -79,7 +79,9 @@ function computeVMA(doneList) {
 
   const results = {};
   Object.entries(VMA_RATIO).forEach(([type, meta]) => {
-    const sessions = recent.filter(r => r.type === type && r.dist >= (type === "Fractionné / VMA" ? 2 : 4));
+    // Exclure Fractionné/VMA : allure moyenne faussée par échauffement/récup
+    if (meta.exclude) return;
+    const sessions = recent.filter(r => r.type === type && r.dist >= 4);
     if (sessions.length === 0) return;
     // Allure moyenne en sec/km
     const paces = sessions.map(r => (r.dur * 60) / r.dist);
@@ -99,9 +101,10 @@ function computeVMA(doneList) {
 
   if (Object.keys(results).length === 0) return null;
 
-  // Moyenne pondérée
+  // Moyenne pondérée (séances non exclues uniquement)
   let totalWeight = 0, weightedVMA = 0;
   Object.values(results).forEach(r => {
+    if (r.exclude) return;
     weightedVMA += r.vmaEstimate * r.weight;
     totalWeight += r.weight;
   });
@@ -488,6 +491,14 @@ export default function App() {
   async function deleteSession(id){
     await deletePlanned(id);
     setPlanned(prev=>prev.filter(p=>p.id!==id));
+  }
+
+  async function deleteJournalEntry(entry){
+    if(!window.confirm("Supprimer cette séance du journal ?
+Si elle était planifiée, elle repassera en 'à faire'.")) return;
+    await deleteDone(entry.id);
+    setDone(prev=>prev.filter(r=>r.id!==entry.id));
+    // Si liée à une séance planifiée, on ne touche à rien — elle redevient automatiquement "à faire"
   }
 
   function buildCoachContext(){
@@ -1308,6 +1319,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                       <span style={{fontSize:20}}>{FEELINGS[(r.feeling||3)-1]}</span>
                       {score!==null&&<div style={{fontSize:13,fontWeight:700,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}/100</div>}
                       <button className="btn-ghost" onClick={()=>openEdit(r)} style={{borderRadius:8,padding:"4px 10px",fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>✏ MODIFIER</button>
+                      <button onClick={()=>deleteJournalEntry(r)} style={{background:"#FF6B6B18",border:"1px solid #FF6B6B33",color:"#FF6B6B88",cursor:"pointer",fontSize:10,padding:"4px 8px",borderRadius:6,fontFamily:"'JetBrains Mono',monospace",lineHeight:1}}>🗑 SUPPR.</button>
                     </div>
                   </div>
                   {r.notes&&<div style={{marginTop:10,fontSize:11,color:"#666",fontFamily:"'JetBrains Mono',monospace",borderTop:"1px solid #1C1F27",paddingTop:10}}>💬 {r.notes}</div>}
