@@ -1012,7 +1012,50 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>+ AJOUTER</button>
                 </div>
 
-                {[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||done.find(d=>d.plannedId===p.id)).map(p=>{
+                {(()=>{
+                  // Grouper par semaine
+                  const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||done.find(d=>d.plannedId===p.id));
+                  const weeks={};
+                  sorted.forEach(p=>{
+                    const wk=wkKey(p.date);
+                    if(!weeks[wk]) weeks[wk]=[];
+                    weeks[wk].push(p);
+                  });
+                  return Object.entries(weeks).sort(([a],[b])=>a.localeCompare(b)).map(([wk,sessions])=>{
+                    const totalKm=sessions.reduce((s,p)=>s+(p.targetDist||0),0);
+                    const totalMin=sessions.reduce((s,p)=>s+(p.targetDur||0),0);
+                    const totalH=Math.floor(totalMin/60);
+                    const totalM=totalMin%60;
+                    const doneCount=sessions.filter(p=>done.find(d=>d.plannedId===p.id)).length;
+                    const maxKm=80; // référence barre = 80km
+                    const barPct=Math.min((totalKm/maxKm)*100,100);
+                    const wkDate=new Date(wk+"T00:00:00");
+                    const wkEnd=new Date(wkDate); wkEnd.setDate(wkEnd.getDate()+6);
+                    const wkLabel=`${wkDate.getDate()} ${wkDate.toLocaleDateString("fr-FR",{month:"short"})} – ${wkEnd.getDate()} ${wkEnd.toLocaleDateString("fr-FR",{month:"short"})}`;
+                    const isCurrentWk=wkKey(TODAY_STR)===wk;
+                    return (
+                      <div key={wk} style={{marginBottom:20}}>
+                        {/* Header semaine */}
+                        <div style={{marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                            <span style={{fontSize:10,color:isCurrentWk?"#FFE66D":"#555",fontFamily:"'JetBrains Mono',monospace",letterSpacing:2}}>
+                              {isCurrentWk?"▶ SEMAINE EN COURS":wkLabel}
+                            </span>
+                            <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:"#888"}}>
+                              <span style={{color:"#E8E4DC",fontWeight:700}}>{totalKm.toFixed(0)} km</span>
+                              <span style={{color:"#555",margin:"0 4px"}}>·</span>
+                              <span style={{color:"#888"}}>{totalH>0?`${totalH}h${String(totalM).padStart(2,"0")}`:`${totalMin}min`}</span>
+                              <span style={{color:"#555",margin:"0 4px"}}>·</span>
+                              <span style={{color:doneCount===sessions.length&&sessions.length>0?"#4ECDC4":"#555"}}>{doneCount}/{sessions.length}</span>
+                            </span>
+                          </div>
+                          {/* Barre volume */}
+                          <div style={{height:3,background:"#1C1F27",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${barPct}%`,background:isCurrentWk?"#FFE66D":totalKm>60?"#FF6B6B":totalKm>40?"#FF9F43":"#6BF178",borderRadius:2,transition:"width 0.3s"}}/>
+                          </div>
+                        </div>
+                        {/* Séances de la semaine */}
+                        {sessions.map(p=>{
                   const tm=TYPE_META[p.type]||TYPE_META["Footing"];
                   const linked=done.find(d=>d.plannedId===p.id);
                   const score=linked?scoreSession(p,linked):null;
@@ -1049,6 +1092,10 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                     </div>
                   );
                 })}
+                      </div> {/* fin semaine */}
+                    );
+                  });
+                })()}
               </>
             ) : (
               <div>
