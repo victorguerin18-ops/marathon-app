@@ -11,7 +11,7 @@ const TYPE_META = {
   "Footing":               { color: "#A8DADC", dark: "#0d1f20", icon: "〜", desc: "Run libre, pas structuré" },
   "Endurance fondamentale":{ color: "#FFE66D", dark: "#2b2700", icon: "◈", desc: "Zone 2, FC ≤ 150 bpm" },
   "Tempo / Seuil":         { color: "#FF9F43", dark: "#2b1a00", icon: "◇", desc: "Allure 10km / seuil" },
-  "Fractionné / VMA":      { color: "#FF6B6B", dark: "#2b0d0d", icon: "▲▲", desc: "Intervalles intenses" },
+  "Fractionné / VMA":      { color: "#6BF178", dark: "#0d2b0f", icon: "▲▲", desc: "Intervalles intenses" },
   "Sortie longue":         { color: "#C77DFF", dark: "#1e0d2b", icon: "◈◈◈", desc: "Distance maximale" },
   "Course":                { color: "#FFD700", dark: "#2b2200", icon: "🏅", desc: "Compétition chronométrée" },
 };
@@ -206,6 +206,7 @@ export default function App() {
     .spin{animation:spin 1s linear infinite;display:inline-block}
     .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 4px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:9px;flex:1;text-align:center;line-height:1.3}
     .type-btn:hover{opacity:.8}
+    .safe-bottom{padding-bottom:env(safe-area-inset-bottom, 16px)}
   `;
 
   if (loading) return (
@@ -217,17 +218,19 @@ export default function App() {
   );
 
   return (
-    <div style={{ minHeight:"100vh", background:"#080A0E", fontFamily:"'Syne',sans-serif", color:"#E8E4DC", maxWidth:480, margin:"0 auto", paddingBottom:80 }}>
+    <div style={{ minHeight:"100vh", background:"#080A0E", fontFamily:"'Syne',sans-serif", color:"#E8E4DC", maxWidth:480, margin:"0 auto", paddingBottom:`calc(72px + env(safe-area-inset-bottom, 16px))` }}>
       <style>{css}</style>
 
       {/* TOP BAR */}
       <div style={{ padding:"20px 20px 0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
-          <div style={{ fontSize:11, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>MARATHON · OCT 2026</div>
+          <div style={{ fontSize:11, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>MARATHON DE LILLE</div>
           <div style={{ fontSize:28, fontWeight:800, letterSpacing:-1, marginTop:2 }}>
             {DAYS_LEFT}<span style={{ fontSize:14, color:"#555", fontWeight:400, marginLeft:4 }}>jours</span>
-            {" · "}{WEEKS_LEFT}<span style={{ fontSize:14, color:"#555", fontWeight:400, marginLeft:4 }}>sem.</span>
+            <span style={{ fontSize:14, color:"#333", fontWeight:400, margin:"0 6px" }}>·</span>
+            {WEEKS_LEFT}<span style={{ fontSize:14, color:"#555", fontWeight:400, marginLeft:4 }}>sem.</span>
           </div>
+          <div style={{ fontSize:10, color:"#333", fontFamily:"'JetBrains Mono',monospace", marginTop:2, letterSpacing:1 }}>25 OCT 2026</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
           <button className="btn-ghost" onClick={() => setModal({type:"plan"})} style={{ borderRadius:10, padding:"8px 14px", fontSize:12, fontFamily:"'JetBrains Mono',monospace" }}>+ PLANIFIER</button>
@@ -420,17 +423,14 @@ export default function App() {
                 {acwr>1.3?"⚠ Risque de blessure élevé. Réduis la charge de 20-30%.":acwr>1.15?"△ Charge modérée. Surveille ta récupération.":"✓ Tu es dans la zone optimale. Continue !"}
               </div>
             </div>
-
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>VOLUME HEBDOMADAIRE</div>
               <VolumeChart weeks={weeklyVol} />
             </div>
-
             <div className="card" style={{ padding:22, marginBottom:14 }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE (endurance fondamentale)</div>
+              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE · ENDURANCE FONDAMENTALE</div>
               <PaceChart data={paceProgression} />
             </div>
-
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VARIÉTÉ (4 sem.)</div>
@@ -445,7 +445,7 @@ export default function App() {
                   <div key={type} style={{ marginBottom:10 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:12 }}>
                       <span style={{ color:tm.color }}>{tm.icon} {type}</span>
-                      <span style={{ color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{count} séances · {Math.round(count/total*100)}%</span>
+                      <span style={{ color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{count} · {Math.round(count/total*100)}%</span>
                     </div>
                     <div style={{ height:5, background:"#1C1F27", borderRadius:3 }}>
                       <div style={{ height:5, width:`${count/total*100}%`, background:tm.color, borderRadius:3 }} />
@@ -453,10 +453,8 @@ export default function App() {
                   </div>
                 );
               })}
-              {/* Conseil variété */}
               {(() => {
-                const types = Object.keys(typeVariety);
-                const missing = ["Endurance fondamentale","Fractionné / VMA","Sortie longue"].filter(t => !types.includes(t));
+                const missing = ["Endurance fondamentale","Fractionné / VMA","Sortie longue"].filter(t => !Object.keys(typeVariety).includes(t));
                 if (missing.length > 0) return (
                   <div style={{ marginTop:12, padding:"10px 12px", background:"#2b1a0033", border:"1px solid #FF9F4333", borderRadius:8, fontSize:11, color:"#FF9F43", fontFamily:"'JetBrains Mono',monospace" }}>
                     💡 Manque : {missing.join(", ")}
@@ -514,8 +512,14 @@ export default function App() {
         )}
       </div>
 
-      {/* BOTTOM NAV */}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:480, maxWidth:"100vw", background:"#0F1117", borderTop:"1px solid #1C1F27", display:"flex", zIndex:50 }}>
+      {/* BOTTOM NAV — safe area iPhone */}
+      <div style={{
+        position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
+        width:480, maxWidth:"100vw",
+        background:"#0F1117", borderTop:"1px solid #1C1F27",
+        display:"flex", zIndex:50,
+        paddingBottom:"env(safe-area-inset-bottom, 12px)",
+      }}>
         {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl]) => (
           <button key={v} className="nav-tab" onClick={() => setView(v)} style={{ flex:1, padding:"12px 0 8px", color:view===v?"#E8E4DC":"#444", background:"transparent", display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
             <span style={{ fontSize:18 }}>{ico}</span>
@@ -527,7 +531,7 @@ export default function App() {
       {/* MODALS */}
       {modal && (
         <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.85)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(6px)" }}>
-          <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto" }}>
+          <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto", paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))` }}>
 
             {/* PLANIFIER */}
             {modal.type === "plan" && (<>
