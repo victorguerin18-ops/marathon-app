@@ -52,6 +52,134 @@ function scoreSession(planned, done) {
   return Math.round((distScore * 0.4 + durScore * 0.3 + hrScore * 0.3));
 }
 
+// ─── SMOOTH AREA CHART ───────────────────────────────────────────────
+function AreaChart({ data, color, unit, formatY }) {
+  if (!data || data.length < 2) return (
+    <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace", padding:"30px 0", textAlign:"center" }}>
+      Pas assez de données
+    </div>
+  );
+
+  const W = 440; const H = 120; const padL = 44; const padB = 24; const padT = 12; const padR = 8;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  const minVal = 0;
+
+  const pts = data.map((d, i) => ({
+    x: padL + (i / (data.length - 1)) * innerW,
+    y: padT + (1 - (d.value - minVal) / (maxVal - minVal)) * innerH,
+    ...d,
+  }));
+
+  // Catmull-Rom smooth curve
+  function catmullRom(pts) {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(i - 1, 0)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(i + 2, pts.length - 1)];
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+    return d;
+  }
+
+  const linePath = catmullRom(pts);
+  const areaPath = linePath + ` L ${pts[pts.length-1].x} ${padT + innerH} L ${pts[0].x} ${padT + innerH} Z`;
+
+  // Y axis ticks
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
+    y: padT + (1 - t) * innerH,
+    val: Math.round(minVal + t * (maxVal - minVal)),
+  }));
+
+  // X axis labels — show ~4 evenly spaced
+  const step = Math.max(1, Math.floor(data.length / 4));
+  const xLabels = data.filter((_, i) => i % step === 0 || i === data.length - 1);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:H }}>
+      <defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0.02"/>
+        </linearGradient>
+        <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4"/>
+          <stop offset="100%" stopColor={color} stopOpacity="1"/>
+        </linearGradient>
+      </defs>
+
+      {/* Grid lines */}
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line x1={padL} y1={t.y} x2={W - padR} y2={t.y} stroke="#1C1F27" strokeWidth={1} strokeDasharray={i === 0 ? "none" : "3,4"}/>
+          <text x={padL - 5} y={t.y + 4} textAnchor="end" fill="#444" fontSize={9} fontFamily="JetBrains Mono">{formatY ? formatY(t.val) : t.val}</text>
+        </g>
+      ))}
+
+      {/* Area fill */}
+      <path d={areaPath} fill="url(#areaGrad)"/>
+
+      {/* Line */}
+      <path d={linePath} fill="none" stroke="url(#lineGrad)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+
+      {/* Dots — only last point highlighted */}
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={i === pts.length - 1 ? 4 : 2.5}
+          fill={i === pts.length - 1 ? color : "#080A0E"}
+          stroke={color} strokeWidth={i === pts.length - 1 ? 0 : 1.5}
+          opacity={i === pts.length - 1 ? 1 : 0.6}/>
+      ))}
+
+      {/* X labels */}
+      {xLabels.map((d, i) => {
+        const idx = data.indexOf(d);
+        const x = padL + (idx / (data.length - 1)) * innerW;
+        return (
+          <text key={i} x={x} y={H - 4} textAnchor="middle" fill="#444" fontSize={9} fontFamily="JetBrains Mono">
+            {d.label}
+          </text>
+        );
+      })}
+
+      {/* Last value callout */}
+      {pts.length > 0 && (() => {
+        const last = pts[pts.length - 1];
+        const val = formatY ? formatY(last.value) : `${last.value}${unit}`;
+        return (
+          <g>
+            <rect x={last.x - 22} y={last.y - 20} width={44} height={16} rx={4} fill={color} opacity={0.15}/>
+            <text x={last.x} y={last.y - 8} textAnchor="middle" fill={color} fontSize={10} fontWeight="700" fontFamily="JetBrains Mono">{val}</text>
+          </g>
+        );
+      })()}
+    </svg>
+  );
+}
+
+// ─── PERIOD SELECTOR ─────────────────────────────────────────────────
+const PERIODS = [
+  { key:"1m",  label:"1 mois",  days:30 },
+  { key:"2m",  label:"2 mois",  days:61 },
+  { key:"4m",  label:"4 mois",  days:122 },
+  { key:"1y",  label:"1 an",    days:365 },
+  { key:"all", label:"Tout",    days:null },
+];
+
+const METRICS = [
+  { key:"km",    label:"KM",      desc:"Kilomètres / semaine" },
+  { key:"time",  label:"TEMPS",   desc:"Minutes de course / semaine" },
+  { key:"load",  label:"CHARGE",  desc:"Charge = km × RPE moyen" },
+];
+
 export default function App() {
   const [planned, setPlanned] = useState([]);
   const [done,    setDone]    = useState([]);
@@ -61,8 +189,10 @@ export default function App() {
   const [stravaConnected, setStravaConnected] = useState(() => !!STORE.get("strava_token", null));
   const [stravaLoading, setStravaLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
-  const todayStr = TODAY.toISOString().slice(0,10);
   const [editForm, setEditForm] = useState(null);
+  const [period, setPeriod] = useState("4m");
+  const [metric, setMetric] = useState("km");
+  const todayStr = TODAY.toISOString().slice(0,10);
 
   useEffect(() => {
     async function init() {
@@ -107,6 +237,58 @@ export default function App() {
     setStravaLoading(false);
   }
 
+  // ── Build weekly volume data filtered by period ──
+  const volumeData = useMemo(() => {
+    const sel = PERIODS.find(p => p.key === period);
+    const cutoff = sel.days
+      ? new Date(TODAY.getTime() - sel.days * 86400000)
+      : null;
+
+    const filtered = done.filter(r => {
+      if (!cutoff) return true;
+      const [y,m,d] = r.date.split('-');
+      return new Date(+y,+m-1,+d) >= cutoff;
+    });
+
+    const weeks = {};
+    filtered.forEach(r => {
+      const wk = wkKey(r.date);
+      if (!weeks[wk]) weeks[wk] = { dist:0, dur:0, rpe:[], runs:0 };
+      weeks[wk].dist += r.dist;
+      weeks[wk].dur += r.dur;
+      weeks[wk].rpe.push(r.rpe || 5);
+      weeks[wk].runs++;
+    });
+
+    // Fill missing weeks with 0
+    if (cutoff) {
+      let cur = new Date(cutoff);
+      const todayWk = wkKey(todayStr);
+      while (wkKey(cur.toISOString().slice(0,10)) <= todayWk) {
+        const key = wkKey(cur.toISOString().slice(0,10));
+        if (!weeks[key]) weeks[key] = { dist:0, dur:0, rpe:[5], runs:0 };
+        cur.setDate(cur.getDate() + 7);
+      }
+    }
+
+    return Object.entries(weeks)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([wk, d]) => {
+        const avgRpe = d.rpe.length ? d.rpe.reduce((s,v)=>s+v,0)/d.rpe.length : 5;
+        const [,m,day] = wk.split('-');
+        return {
+          wk,
+          dist: Math.round(d.dist * 10) / 10,
+          dur: Math.round(d.dur),
+          load: Math.round(d.dist * avgRpe),
+          label: `${parseInt(day)}/${parseInt(m)}`,
+          value: metric === 'km' ? Math.round(d.dist * 10) / 10
+               : metric === 'time' ? Math.round(d.dur)
+               : Math.round(d.dist * avgRpe),
+        };
+      });
+  }, [done, period, metric, todayStr]);
+
   const weeklyVol = useMemo(() => {
     const weeks = {};
     done.forEach(r => {
@@ -140,7 +322,12 @@ export default function App() {
     return [...done]
       .filter(r => (r.type === "Endurance fondamentale" || r.type === "Endurance") && r.dist > 5)
       .sort((a,b) => a.date.localeCompare(b.date))
-      .map(r => ({ date: r.date, pace: (r.dur * 60) / r.dist }));
+      .map(r => ({
+        date: r.date,
+        pace: (r.dur * 60) / r.dist,
+        label: fmtDate(r.date, {day:"numeric", month:"numeric"}),
+        value: Math.round((r.dur * 60) / r.dist),
+      }));
   }, [done]);
 
   const [planForm, setPlanForm] = useState({ date:todayStr, type:"Endurance fondamentale", targetDist:"", targetDur:"", targetHR:"", notes:"" });
@@ -180,14 +367,20 @@ export default function App() {
   const todayPlanned = planned.filter(p => p.date === todayStr);
   const upcoming = planned.filter(p => isFuture(p.date)).sort((a,b) => a.date.localeCompare(b.date));
 
+  const selMetric = METRICS.find(m => m.key === metric);
+
+  function fmtMetric(val) {
+    if (metric === 'km') return `${val}km`;
+    if (metric === 'time') return `${Math.floor(val/60)}h${String(val%60).padStart(2,'0')}`;
+    return `${val}`;
+  }
+
   const css = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{background:#080A0E}
     ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#222}
     .card{background:#0F1117;border:1px solid #1C1F27;border-radius:14px}
-    .card-hover{transition:all .2s;cursor:pointer}
-    .card-hover:hover{background:#141720!important;border-color:#2a2d38!important;transform:translateY(-1px)}
     .nav-tab{transition:all .2s;border:none;cursor:pointer;font-family:inherit}
     .btn-primary{transition:all .2s;border:none;cursor:pointer;font-family:inherit}
     .btn-primary:hover{opacity:.85;transform:scale(.98)}
@@ -205,8 +398,7 @@ export default function App() {
     @keyframes spin{to{transform:rotate(360deg)}}
     .spin{animation:spin 1s linear infinite;display:inline-block}
     .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 4px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:9px;flex:1;text-align:center;line-height:1.3}
-    .type-btn:hover{opacity:.8}
-    .safe-bottom{padding-bottom:env(safe-area-inset-bottom, 16px)}
+    .seg-btn{transition:all .15s;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;letter-spacing:1px}
   `;
 
   if (loading) return (
@@ -238,14 +430,12 @@ export default function App() {
         </div>
       </div>
 
-      {/* PROGRESS BAR */}
       <div style={{ padding:"12px 20px 0" }}>
         <div style={{ height:3, background:"#1C1F27", borderRadius:2 }}>
           <div style={{ height:3, width:`${Math.round((32-WEEKS_LEFT)/32*100)}%`, background:"linear-gradient(90deg,#4ECDC4,#FFE66D)", borderRadius:2 }} />
         </div>
       </div>
 
-      {/* STRAVA */}
       <div style={{ padding:"12px 20px 0" }}>
         {!stravaConnected ? (
           <button onClick={stravaLogin} style={{ width:"100%", background:"#FC4C02", border:"none", borderRadius:10, padding:"12px", color:"#fff", fontSize:13, fontWeight:700, fontFamily:"'JetBrains Mono',monospace", cursor:"pointer" }}>
@@ -264,7 +454,6 @@ export default function App() {
         )}
       </div>
 
-      {/* NAV */}
       <div style={{ display:"flex", gap:4, padding:"16px 20px 0" }}>
         {[["today","AUJOURD'HUI"],["plan","PLAN"],["analyse","ANALYSE"],["journal","JOURNAL"]].map(([v,l]) => (
           <button key={v} className="nav-tab" onClick={() => setView(v)}
@@ -334,7 +523,7 @@ export default function App() {
                 {upcoming.slice(0,3).map(p => {
                   const tm = TYPE_META[p.type] || TYPE_META["Footing"];
                   return (
-                    <div key={p.id} className="card card-hover" style={{ padding:"14px 16px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}>
+                    <div key={p.id} className="card" style={{ padding:"14px 16px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}>
                       <div style={{ width:40, height:40, borderRadius:10, background:tm.dark, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{tm.icon}</div>
                       <div style={{ flex:1 }}>
                         <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace" }}>{fmtDate(p.date)}</div>
@@ -403,6 +592,8 @@ export default function App() {
         {/* ANALYSE */}
         {view === "analyse" && (
           <div className="fade-up">
+
+            {/* ACWR */}
             <div className="card" style={{ padding:22, marginBottom:14, borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27" }}>
               <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>CHARGE · ACWR</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:14 }}>
@@ -423,14 +614,92 @@ export default function App() {
                 {acwr>1.3?"⚠ Risque de blessure élevé. Réduis la charge de 20-30%.":acwr>1.15?"△ Charge modérée. Surveille ta récupération.":"✓ Tu es dans la zone optimale. Continue !"}
               </div>
             </div>
+
+            {/* VOLUME CHART */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:16 }}>VOLUME HEBDOMADAIRE</div>
-              <VolumeChart weeks={weeklyVol} />
+              {/* Header */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VOLUME</div>
+                  <div style={{ fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace", marginTop:2 }}>{selMetric.desc}</div>
+                </div>
+                {/* Metric selector */}
+                <div style={{ display:"flex", gap:4, background:"#080A0E", borderRadius:8, padding:3 }}>
+                  {METRICS.map(m => (
+                    <button key={m.key} className="seg-btn" onClick={() => setMetric(m.key)}
+                      style={{ background: metric===m.key ? "#1C1F27" : "transparent", color: metric===m.key ? "#E8E4DC" : "#555" }}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Period selector */}
+              <div style={{ display:"flex", gap:4, marginBottom:16 }}>
+                {PERIODS.map(p => (
+                  <button key={p.key} className="seg-btn" onClick={() => setPeriod(p.key)}
+                    style={{ flex:1, background: period===p.key ? "#FFE66D" : "#080A0E", color: period===p.key ? "#080A0E" : "#555", borderRadius:8, fontWeight: period===p.key ? 700 : 400 }}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Chart */}
+              <AreaChart
+                data={volumeData}
+                color="#FFE66D"
+                unit={metric==='km'?'km':metric==='time'?'min':''}
+                formatY={fmtMetric}
+              />
+
+              {/* Stats row */}
+              {volumeData.length > 0 && (() => {
+                const nonZero = volumeData.filter(d => d.value > 0);
+                const avg = nonZero.length ? Math.round(nonZero.reduce((s,d)=>s+d.value,0)/nonZero.length) : 0;
+                const max = nonZero.length ? Math.max(...nonZero.map(d=>d.value)) : 0;
+                const last = volumeData[volumeData.length-1]?.value || 0;
+                return (
+                  <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                    {[["CETTE SEM.", fmtMetric(last)],["MOYENNE", fmtMetric(avg)],["MAX", fmtMetric(max)]].map(([lbl,val]) => (
+                      <div key={lbl} style={{ flex:1, background:"#080A0E", borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+                        <div style={{ fontSize:9, color:"#555", fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>{lbl}</div>
+                        <div style={{ fontSize:14, fontWeight:700 }}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
+
+            {/* PACE CHART */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
-              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:6 }}>PROGRESSION ALLURE · ENDURANCE FONDAMENTALE</div>
-              <PaceChart data={paceProgression} />
+              <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>PROGRESSION ALLURE</div>
+              <div style={{ fontSize:11, color:"#888", fontFamily:"'JetBrains Mono',monospace", marginBottom:14 }}>Endurance fondamentale &gt; 5km · plus bas = plus vite 🏃</div>
+              <AreaChart
+                data={paceProgression}
+                color="#6BF178"
+                formatY={val => {
+                  const m = Math.floor(val/60);
+                  const s = Math.round(val%60);
+                  return `${m}'${String(s).padStart(2,'0')}"`;
+                }}
+              />
+              {paceProgression.length >= 2 && (() => {
+                const first = paceProgression[0].value;
+                const last = paceProgression[paceProgression.length-1].value;
+                const diff = first - last;
+                const improved = diff > 0;
+                return (
+                  <div style={{ marginTop:14, padding:"12px", background:"#080A0E", borderRadius:8, fontSize:11, color: improved?"#6BF178":"#FF9F43", fontFamily:"'JetBrains Mono',monospace" }}>
+                    {improved
+                      ? `✓ Tu as gagné ${Math.floor(diff/60)}'${String(Math.round(diff%60)).padStart(2,'0')}" /km depuis le début 🔥`
+                      : `△ Allure stable — continue à accumuler du volume en zone 2`}
+                  </div>
+                );
+              })()}
             </div>
+
+            {/* VARIÉTÉ */}
             <div className="card" style={{ padding:22, marginBottom:14 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div style={{ fontSize:10, color:"#555", letterSpacing:3, fontFamily:"'JetBrains Mono',monospace" }}>VARIÉTÉ (4 sem.)</div>
@@ -512,14 +781,8 @@ export default function App() {
         )}
       </div>
 
-      {/* BOTTOM NAV — safe area iPhone */}
-      <div style={{
-        position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
-        width:480, maxWidth:"100vw",
-        background:"#0F1117", borderTop:"1px solid #1C1F27",
-        display:"flex", zIndex:50,
-        paddingBottom:"env(safe-area-inset-bottom, 12px)",
-      }}>
+      {/* BOTTOM NAV */}
+      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:480, maxWidth:"100vw", background:"#0F1117", borderTop:"1px solid #1C1F27", display:"flex", zIndex:50, paddingBottom:"env(safe-area-inset-bottom, 12px)" }}>
         {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl]) => (
           <button key={v} className="nav-tab" onClick={() => setView(v)} style={{ flex:1, padding:"12px 0 8px", color:view===v?"#E8E4DC":"#444", background:"transparent", display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
             <span style={{ fontSize:18 }}>{ico}</span>
@@ -533,7 +796,6 @@ export default function App() {
         <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.85)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(6px)" }}>
           <div onClick={e => e.stopPropagation()} className="pop" style={{ background:"#0F1117", border:"1px solid #1C1F27", borderRadius:"20px 20px 0 0", padding:28, width:"100%", maxWidth:480, maxHeight:"85vh", overflowY:"auto", paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))` }}>
 
-            {/* PLANIFIER */}
             {modal.type === "plan" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Planifier une séance</div>
               <div style={{ marginBottom:16 }}>
@@ -561,7 +823,6 @@ export default function App() {
               </div>
             </>)}
 
-            {/* LOG */}
             {modal.type === "log" && (<>
               <div style={{ fontSize:22, fontWeight:800, marginBottom:24 }}>Enregistrer une séance</div>
               <div style={{ marginBottom:16 }}>
@@ -598,7 +859,6 @@ export default function App() {
               </div>
             </>)}
 
-            {/* EDIT */}
             {modal.type === "edit" && editForm && (<>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
                 <div style={{ fontSize:22, fontWeight:800 }}>Modifier la séance</div>
@@ -666,41 +926,6 @@ function CompareBar({ planned, done }) {
         );
       })}
     </div>
-  );
-}
-
-function VolumeChart({ weeks }) {
-  if (!weeks.length) return null;
-  const max = Math.max(...weeks.map(w => w.dist), 1);
-  return (
-    <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:100 }}>
-      {[...weeks].reverse().map((w, i) => {
-        const h = Math.max((w.dist/max)*80, 4);
-        const isLatest = i === weeks.length-1;
-        return (
-          <div key={w.wk} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <div style={{ fontSize:9, color:isLatest?"#E8E4DC":"#555", fontFamily:"'JetBrains Mono',monospace" }}>{w.dist.toFixed(0)}</div>
-            <div style={{ width:"100%", height:h, background:isLatest?"#FFE66D":"#1C1F27", borderRadius:"3px 3px 0 0" }} />
-            <div style={{ fontSize:8, color:"#333", fontFamily:"'JetBrains Mono',monospace" }}>{new Date(w.wk).toLocaleDateString("fr",{day:"numeric",month:"numeric"})}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function PaceChart({ data }) {
-  if (data.length < 2) return <div style={{ fontSize:11, color:"#555", fontFamily:"'JetBrains Mono',monospace", padding:"20px 0", textAlign:"center" }}>Pas assez de données</div>;
-  const max = Math.max(...data.map(d=>d.pace));
-  const min = Math.min(...data.map(d=>d.pace));
-  const w = 400; const h = 80; const pad = 10;
-  const pts = data.map((d,i) => { const x = pad+i/(data.length-1)*(w-2*pad); const y = pad+(1-(d.pace-min)/(max-min||1))*(h-2*pad); return `${x},${y}`; }).join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} style={{ width:"100%", height:h }}>
-      <defs><linearGradient id="pg" x1="0" x2="1" y1="0" y2="0"><stop offset="0%" stopColor="#FF6B6B"/><stop offset="100%" stopColor="#4ECDC4"/></linearGradient></defs>
-      <polyline points={pts} fill="none" stroke="url(#pg)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-      {data.map((d,i) => { const x = pad+i/(data.length-1)*(w-2*pad); const y = pad+(1-(d.pace-min)/(max-min||1))*(h-2*pad); return <circle key={i} cx={x} cy={y} r={3} fill={i===data.length-1?"#4ECDC4":"#1C1F27"} stroke={i===data.length-1?"#4ECDC4":"#555"} strokeWidth={1.5}/>; })}
-    </svg>
   );
 }
 
