@@ -35,14 +35,15 @@ function wkKey(d) {
 }
 
 function fmtDate(d, opts = { weekday:"short", day:"numeric", month:"short" }) {
-  return new Date(d).toLocaleDateString("fr-FR", opts);
+  const [y, m, day] = d.split('-');
+  return new Date(+y, +m - 1, +day).toLocaleDateString("fr-FR", opts);
 }
 
 function isToday(d) { return d === TODAY.toISOString().slice(0,10); }
-function isFuture(d) { return new Date(d) > TODAY; }
-function isPast(d) { return new Date(d) < TODAY; }
-
+function isFuture(d) { const [y,m,day] = d.split('-'); return new Date(+y,+m-1,+day) > TODAY; }
+function isPast(d) { const [y,m,day] = d.split('-'); return new Date(+y,+m-1,+day) < TODAY; }
 function scoreSession(planned, done) {
+
   if (!planned || !done) return null;
   const distScore = Math.max(0, 100 - Math.abs(done.dist - planned.targetDist) / planned.targetDist * 100);
   const durScore  = Math.max(0, 100 - Math.abs(done.dur - planned.targetDur) / planned.targetDur * 100);
