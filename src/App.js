@@ -85,7 +85,7 @@ function computeVMA(doneList) {
     const paces = sessions.map(r => (r.dur * 60) / r.dist);
     const avgPace = paces.reduce((s, v) => s + v, 0) / paces.length;
     // VMA estimée : si on court à X% de VMA → VMA = pace_s / ratio × (3600/3600) en km/h
-    const vmaKmh = 3600 / (avgPace / meta.ratio);
+    const vmaKmh = (3600 / avgPace) / meta.ratio; // vitesse constatée (km/h) ÷ ratio
     const paceAtVMA = 3600 / vmaKmh; // sec/km à 100% VMA
     results[type] = {
       ...meta,
