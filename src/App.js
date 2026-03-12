@@ -398,6 +398,7 @@ export default function App() {
   const [planConfig, setPlanConfig] = useState(()=>STORE.get("plan_config",null)||defaultConfig(VMA_DEFAULT));
   const [showWizard, setShowWizard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [paceEdit, setPaceEdit] = useState(null); // key de l'allure en cours d'édition
   const [planGenLoading, setPlanGenLoading] = useState(false);
 
   // Chart state
@@ -986,15 +987,36 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   </div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
                     {[
-                      {label:"EF",pace:planConfig.paces.ef,color:"#6BF178"},
-                      {label:"SL",pace:planConfig.paces.sl,color:"#C77DFF"},
-                      {label:"Tempo",pace:planConfig.paces.tempo,color:"#FF9F43"},
-                      {label:"VMA",pace:planConfig.paces.vma,color:"#FF6B6B"},
-                    ].map(({label,pace,color})=>(
-                      <span key={label} style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:color+"11",color,fontFamily:"'JetBrains Mono',monospace",border:`1px solid ${color}33`}}>
-                        {label} · {fmtPace(pace)}/km
-                      </span>
-                    ))}
+                      {label:"EF",   key:"ef",    color:"#6BF178"},
+                      {label:"SL",   key:"sl",    color:"#C77DFF"},
+                      {label:"Tempo",key:"tempo", color:"#FF9F43"},
+                      {label:"VMA",  key:"vma",   color:"#FF6B6B"},
+                    ].map(({label,key,color})=>{
+                      const editing = paceEdit === key;
+                      return editing ? (
+                        <span key={key} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:10,padding:"2px 8px",borderRadius:20,background:color+"22",border:`1px solid ${color}88`,fontFamily:"'JetBrains Mono',monospace"}}>
+                          <span style={{color}}>{label} ·</span>
+                          <input
+                            autoFocus
+                            defaultValue={fmtPace(planConfig.paces[key])}
+                            onBlur={e=>{
+                              const raw = e.target.value.replace(/"/g,'').trim();
+                              const parts = raw.split(/[':]/);
+                              const parsed = parts.length===2 ? parseInt(parts[0])+parseInt(parts[1])/60 : parseFloat(raw)||planConfig.paces[key];
+                              handleSettingsUpdate({paces:{...planConfig.paces,[key]:parsed}});
+                              setPaceEdit(null);
+                            }}
+                            onKeyDown={e=>{if(e.key==="Enter") e.target.blur(); if(e.key==="Escape") setPaceEdit(null);}}
+                            style={{width:52,background:"transparent",border:"none",outline:"none",color:"#E8E4DC",fontFamily:"'JetBrains Mono',monospace",fontSize:10,textAlign:"center"}}
+                          />
+                          <span style={{color:"#555"}}>/km</span>
+                        </span>
+                      ) : (
+                        <span key={key} onClick={()=>setPaceEdit(key)} style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:color+"11",color,fontFamily:"'JetBrains Mono',monospace",border:`1px solid ${color}33`,cursor:"pointer"}} title="Cliquer pour modifier">
+                          {label} · {fmtPace(planConfig.paces[key])}/km ✎
+                        </span>
+                      );
+                    })}
                   </div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>setShowWizard(true)} className="btn-ghost" style={{flex:1,borderRadius:10,padding:"10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace",textAlign:"center"}}>

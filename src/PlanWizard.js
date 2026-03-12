@@ -4,7 +4,7 @@
 import { useState, useMemo } from "react";
 
 const MARATHON_DATE = "2026-10-25";
-const TODAY_STR     = "2026-03-11";
+const TODAY_STR     = new Date().toISOString().split('T')[0];
 
 // ── Date helpers ──────────────────────────────────────────────────────
 function parseDate(str) {
@@ -27,7 +27,6 @@ export function fmtPace(minKm) {
   return `${m}'${String(s).padStart(2,'0')}"`;
 }
 function parsePaceInput(str) {
-  // accepts "5'30"" or "5:30" or "5.5"
   const clean = str.replace(/"/g,'').trim();
   const parts = clean.split(/[':]/);
   if(parts.length===2) return parseInt(parts[0]) + parseInt(parts[1])/60;
@@ -142,7 +141,8 @@ const DAYS_OF_WEEK = [
 export function defaultConfig(vma=15.24) {
   return {
     vma,
-    runDays: [2,4,6,0], // Tue Thu Sat Sun
+    nbWeeks: 16, // durée du plan en semaines
+    runDays: [2,4,6,0],
     intensity: "standard",
     vmaExercise: "6x3",
     tempoExercise: "2x20",
@@ -153,14 +153,12 @@ export function defaultConfig(vma=15.24) {
       sl:    parseFloat((vmaToMinKm(vma,0.65)).toFixed(3)),
     },
     weekTemplate: [
-      // slot 0-3 for runDays[0-3] — semaine A
       {slot:0, type:"Endurance fondamentale"},
       {slot:1, type:"Fractionné / VMA"},
       {slot:2, type:"Endurance fondamentale"},
       {slot:3, type:"Sortie longue"},
     ],
     weekTemplateB: [
-      // semaine B — alternance
       {slot:0, type:"Endurance fondamentale"},
       {slot:1, type:"Tempo / Seuil"},
       {slot:2, type:"Endurance fondamentale"},
@@ -171,7 +169,7 @@ export function defaultConfig(vma=15.24) {
 
 // ── Plan generator (pure function) ───────────────────────────────────
 export function generatePlanFromConfig(config, existingPlanned=[]) {
-  const { runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate, weekTemplateB } = config;
+  const { runDays, intensity, vmaExercise, tempoExercise, paces, weekTemplate, weekTemplateB, nbWeeks } = config;
   const intConf = INTENSITY[intensity];
   const vmaEx   = VMA_EXERCISES.find(e=>e.id===vmaExercise) || VMA_EXERCISES[0];
   const tempoEx = TEMPO_EXERCISES.find(e=>e.id===tempoExercise) || TEMPO_EXERCISES[0];
@@ -181,7 +179,10 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
   const vmaPace   = fmtPace(paces.vma);
   const slPace    = fmtPace(paces.sl);
 
-  // Don't overwrite manually-created sessions (non-generated) in the future
+  // Durée : nbWeeks semaines depuis aujourd'hui (ou jusqu'au marathon si plus proche)
+  const planEndDate = addDays(TODAY_STR, (nbWeeks || 16) * 7);
+  const endDate = planEndDate < MARATHON_DATE ? planEndDate : MARATHON_DATE;
+
   const existingDates = new Set(
     existingPlanned
       .filter(p => !p.generated && parseDate(p.date) > parseDate(TODAY_STR))
@@ -192,7 +193,7 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
   const startDate = addDays(TODAY_STR, 1);
 
   let cur = parseDate(startDate);
-  const end = parseDate(MARATHON_DATE);
+  const end = parseDate(endDate);
   let weekNum = 0;
   let lastMonday = wkKey(TODAY_STR);
 
@@ -206,7 +207,7 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
     if(slotIdx === -1) { cur.setDate(cur.getDate()+1); continue; }
     if(existingDates.has(ds)) { cur.setDate(cur.getDate()+1); continue; }
 
-      const w = weekNum;
+    const w = weekNum;
     const phase = w<=8?"base": w<=20?"specific": w<=28?"marathon":"taper";
     const isEvalWeek = [0,6,12,18,24].includes(w);
     const isRecoveryWeek = [4,9,14,19,24].includes(w);
@@ -214,14 +215,12 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
     const m = intConf.mult * recMult;
     const msl = intConf.slMult * recMult;
 
-    // Map slot to type from weekTemplate A or B (alternating weeks)
     const activeTpl = (weekNum % 2 === 0) ? weekTemplate : (weekTemplateB || weekTemplate);
     const tplSlot = activeTpl.find(s=>s.slot===slotIdx);
     const sessionType = tplSlot?.type || ["Endurance fondamentale","Fractionné / VMA","Footing","Sortie longue"][slotIdx] || "Footing";
 
     let session = null;
 
-    // ── Base phase S1–S8 ─────────────────────────────────────────────
     if(phase==="base") {
       if(sessionType==="Endurance fondamentale") {
         const dist = Math.round((8 + w*0.4) * m * 10)/10;
@@ -260,7 +259,6 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
       }
     }
 
-    // ── Specific phase S9–S20 ────────────────────────────────────────
     if(phase==="specific") {
       const wInPhase = w-8;
       if(sessionType==="Endurance fondamentale") {
@@ -300,10 +298,9 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
       }
     }
 
-    // ── Marathon phase S21–S28 ───────────────────────────────────────
     if(phase==="marathon") {
       const wInPhase = w-20;
-      const amPace = fmtPace(paces.tempo * 0.95); // ~allure marathon
+      const amPace = fmtPace(paces.tempo * 0.95);
       if(sessionType==="Endurance fondamentale") {
         const dist = Math.round(14 * m * 10)/10;
         const dur  = Math.round(dist * paces.ef);
@@ -336,7 +333,6 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
       }
     }
 
-    // ── Taper S29–S31 ────────────────────────────────────────────────
     if(phase==="taper") {
       const factor = w<=29?0.65:w<=30?0.50:0.35;
       if(sessionType==="Endurance fondamentale") {
@@ -361,7 +357,6 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
       }
     }
 
-    // ── Race day ─────────────────────────────────────────────────────
     if(ds===MARATHON_DATE) {
       session={type:"Course",targetDist:42.195,targetDur:210,targetHR:null,
         notes:"🏅 MARATHON DE LILLE · Objectif Sub-3h30 · 4'58\"/km · PROFITE !"};
@@ -386,7 +381,7 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
 // ── WIZARD COMPONENT ─────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════
 
-const STEP_LABELS = ["Jours","Semaine","Allures","Intensité","VMA","Aperçu"];
+const STEP_LABELS = ["Jours","Durée","Semaine","Allures","Intensité","VMA","Aperçu"];
 
 export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
   const [step, setStep] = useState(0);
@@ -440,9 +435,10 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
     .tempo-card.selected{border-color:#FF9F43;background:#2b1a00}
     .wiz-inp{background:#080A0E;border:1px solid #1C1F27;color:#E8E4DC;border-radius:8px;padding:10px 12px;font-size:14px;font-family:'JetBrains Mono',monospace;width:100%;outline:none}
     .wiz-inp:focus{border-color:#444}
+    .weeks-btn{border:2px solid #1C1F27;background:transparent;color:#555;border-radius:10px;width:44px;height:44px;font-size:18px;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .15s}
+    .weeks-btn:hover{border-color:#444;color:#aaa}
   `;
 
-  // Preview: both weeks A and B
   const previewWeeks = useMemo(()=>{
     const dow2name={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
     const meta = {
@@ -474,6 +470,10 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
     "Sortie longue":{color:"#C77DFF",icon:"◈◈◈"},
     "Footing":{color:"#A8DADC",icon:"〜"},
   };
+
+  // Date de fin calculée
+  const endDate = addDays(TODAY_STR, (cfg.nbWeeks||16)*7);
+  const endFmt = parseDate(endDate).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"});
 
   return (
     <div style={{background:"#0F1117",borderRadius:"20px 20px 0 0",padding:24,maxHeight:"90vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom, 12px))"}}>
@@ -525,13 +525,57 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
         </div>
       )}
 
-      {/* ── STEP 1 : Semaine type A/B ── */}
+      {/* ── STEP 1 : Durée ── */}
       {step===1 && (
         <div>
-          <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:12,lineHeight:1.6}}>
-            Configure deux semaines types qui alternent (A une semaine, B la suivante). Parfait pour alterner VMA et Seuil.
+          <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:24,lineHeight:1.6}}>
+            Combien de semaines veux-tu générer ? Idéal pour cibler une phase précise (maintien, transition, prépa…).
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:20,marginBottom:24}}>
+            <button className="weeks-btn" onClick={()=>update({nbWeeks:Math.max(1,(cfg.nbWeeks||16)-1})}>−</button>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:48,fontWeight:800,color:"#00D2FF",fontFamily:"'Syne',sans-serif",lineHeight:1}}>{cfg.nbWeeks||16}</div>
+              <div style={{fontSize:12,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>semaines</div>
+            </div>
+            <button className="weeks-btn" onClick={()=>update({nbWeeks:Math.min(32,(cfg.nbWeeks||16)+1})}>+</button>
           </div>
 
+          {/* Presets rapides */}
+          <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:10,letterSpacing:2}}>PHASES SUGGÉRÉES</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {[
+              {weeks:16, label:"Maintien", desc:"Maintenant → fin juin · volume stable 38–42km", color:"#4ECDC4"},
+              {weeks:4,  label:"Transition", desc:"Juillet · montée progressive 42→50km", color:"#FFE66D"},
+              {weeks:11, label:"Prépa spécifique", desc:"Août → mi-octobre · volume pic 55–60km", color:"#FF9F43"},
+              {weeks:3,  label:"Affûtage", desc:"2–3 semaines avant · volume −30%", color:"#C77DFF"},
+            ].map(({weeks,label,desc,color})=>(
+              <button key={weeks} onClick={()=>update({nbWeeks:weeks})} style={{
+                border:`2px solid ${(cfg.nbWeeks||16)===weeks?color:"#1C1F27"}`,
+                background:(cfg.nbWeeks||16)===weeks?color+"11":"#080A0E",
+                borderRadius:10,padding:"12px 14px",cursor:"pointer",textAlign:"left",
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:13,fontWeight:700,color:(cfg.nbWeeks||16)===weeks?color:"#aaa",fontFamily:"'Syne',sans-serif"}}>{label}</span>
+                  <span style={{fontSize:18,fontWeight:800,color:(cfg.nbWeeks||16)===weeks?color:"#333",fontFamily:"'JetBrains Mono',monospace"}}>{weeks} sem.</span>
+                </div>
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{desc}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{marginTop:16,padding:"10px 14px",background:"#080A0E",borderRadius:8,border:"1px solid #1C1F27"}}>
+            <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>FIN DU PLAN</div>
+            <div style={{fontSize:13,color:"#E8E4DC",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{endFmt}</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STEP 2 : Semaine type A/B ── */}
+      {step===2 && (
+        <div>
+          <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:12,lineHeight:1.6}}>
+            Configure deux semaines types qui alternent (A une semaine, B la suivante).
+          </div>
           {["A","B"].map(week=>{
             const isA = week==="A";
             const tplKey = isA?"weekTemplate":"weekTemplateB";
@@ -539,13 +583,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
             const weekColor = isA?"#00D2FF":"#C77DFF";
             return (
               <div key={week} style={{marginBottom:20}}>
-                <div style={{
-                  fontSize:10,color:weekColor,letterSpacing:3,
-                  fontFamily:"'JetBrains Mono',monospace",marginBottom:10,
-                  padding:"6px 12px",background:weekColor+"11",
-                  borderRadius:8,border:`1px solid ${weekColor}33`,
-                  display:"inline-block"
-                }}>
+                <div style={{fontSize:10,color:weekColor,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10,padding:"6px 12px",background:weekColor+"11",borderRadius:8,border:`1px solid ${weekColor}33`,display:"inline-block"}}>
                   SEMAINE {week} {isA?"(semaines impaires)":"(semaines paires)"}
                 </div>
                 {cfg.runDays.map((dow,slotIdx)=>{
@@ -565,14 +603,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
                               const newTpl=tpl.filter(s=>s.slot!==slotIdx);
                               newTpl.push({slot:slotIdx,type});
                               update({[tplKey]:newTpl});
-                            }} style={{
-                              border:`2px solid ${isSel?t.color:"#1C1F27"}`,
-                              background:isSel?t.color+"22":"transparent",
-                              color:isSel?t.color:"#555",
-                              borderRadius:8,padding:"5px 8px",
-                              fontSize:9,cursor:"pointer",
-                              fontFamily:"'JetBrains Mono',monospace",
-                            }}>
+                            }} style={{border:`2px solid ${isSel?t.color:"#1C1F27"}`,background:isSel?t.color+"22":"transparent",color:isSel?t.color:"#555",borderRadius:8,padding:"5px 8px",fontSize:9,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
                               {type.split(' ')[0]}
                             </button>
                           );
@@ -588,8 +619,8 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
         </div>
       )}
 
-      {/* ── STEP 2 : Allures ── */}
-      {step===2 && (
+      {/* ── STEP 3 : Allures ── */}
+      {step===3 && (
         <div>
           <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:4,lineHeight:1.6}}>
             Allures pré-remplies depuis ta VMA {cfg.vma} km/h. Modifie-les librement.
@@ -621,99 +652,73 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
         </div>
       )}
 
-      {/* ── STEP 3 : Intensité ── */}
-      {step===3 && (
+      {/* ── STEP 4 : Intensité ── */}
+      {step===4 && (
         <div>
           <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:16,lineHeight:1.6}}>
-            Choisir l'intensité globale du plan. Les semaines de récupération (S4, S9…) sont automatiquement allégées de 25%.
+            Choisir l'intensité globale du plan. Les semaines de récupération sont automatiquement allégées de 25%.
           </div>
           {Object.entries(INTENSITY).map(([key,conf])=>(
             <button key={key} onClick={()=>update({intensity:key})}
-              style={{width:"100%",marginBottom:10,border:`2px solid ${cfg.intensity===key?conf.color:"#1C1F27"}`,
-                background:cfg.intensity===key?conf.color+"11":"#080A0E",
-                borderRadius:12,padding:16,textAlign:"left",cursor:"pointer"}}>
+              style={{width:"100%",marginBottom:10,border:`2px solid ${cfg.intensity===key?conf.color:"#1C1F27"}`,background:cfg.intensity===key?conf.color+"11":"#080A0E",borderRadius:12,padding:16,textAlign:"left",cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <span style={{fontSize:14,fontWeight:700,color:cfg.intensity===key?conf.color:"#aaa",fontFamily:"'Syne',sans-serif"}}>{conf.label}</span>
                 {cfg.intensity===key&&<span style={{color:conf.color,fontSize:12}}>✓</span>}
               </div>
               <div style={{fontSize:11,color:"#666",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.5}}>{conf.desc}</div>
-              <div style={{marginTop:8,fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>
-                Volume : ×{conf.mult} · Sorties longues : ×{conf.slMult}
-              </div>
+              <div style={{marginTop:8,fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>Volume : ×{conf.mult} · Sorties longues : ×{conf.slMult}</div>
             </button>
           ))}
         </div>
       )}
 
-      {/* ── STEP 4 : Exercices VMA & Tempo ── */}
-      {step===4 && (
+      {/* ── STEP 5 : Exercices VMA & Tempo ── */}
+      {step===5 && (
         <div>
           <div style={{fontSize:10,color:"#FF6B6B",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>▲▲ FORMAT VMA</div>
           <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
             {VMA_EXERCISES.map(ex=>(
-              <button key={ex.id} className={`ex-card${cfg.vmaExercise===ex.id?" selected":""}`}
-                onClick={()=>update({vmaExercise:ex.id})}>
+              <button key={ex.id} className={`ex-card${cfg.vmaExercise===ex.id?" selected":""}`} onClick={()=>update({vmaExercise:ex.id})}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontSize:14,fontWeight:700,color:cfg.vmaExercise===ex.id?"#FF6B6B":"#aaa",fontFamily:"'Syne',sans-serif"}}>{ex.label}</div>
                   <div style={{display:"flex",gap:3}}>
-                    {Array.from({length:3}).map((_,i)=>(
-                      <div key={i} style={{width:6,height:6,borderRadius:1,background:i<ex.difficulty?"#FF6B6B":"#1C1F27"}}/>
-                    ))}
+                    {Array.from({length:3}).map((_,i)=>(<div key={i} style={{width:6,height:6,borderRadius:1,background:i<ex.difficulty?"#FF6B6B":"#1C1F27"}}/>))}
                   </div>
                 </div>
                 <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{ex.desc}</div>
-                {cfg.vmaExercise===ex.id&&(
-                  <div style={{fontSize:10,color:"#FF6B6B",fontFamily:"'JetBrains Mono',monospace",marginTop:6,borderTop:"1px solid #2b0d0d",paddingTop:6}}>{ex.detail}</div>
-                )}
+                {cfg.vmaExercise===ex.id&&(<div style={{fontSize:10,color:"#FF6B6B",fontFamily:"'JetBrains Mono',monospace",marginTop:6,borderTop:"1px solid #2b0d0d",paddingTop:6}}>{ex.detail}</div>)}
               </button>
             ))}
           </div>
-
           <div style={{fontSize:10,color:"#FF9F43",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>◇ FORMAT TEMPO / SEUIL</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {TEMPO_EXERCISES.map(ex=>(
-              <button key={ex.id} className={`ex-card tempo-card${cfg.tempoExercise===ex.id?" selected":""}`}
-                onClick={()=>update({tempoExercise:ex.id})}
-                style={{borderColor:cfg.tempoExercise===ex.id?"#FF9F43":"#1C1F27",background:cfg.tempoExercise===ex.id?"#2b1a00":"#080A0E"}}>
+              <button key={ex.id} className={`ex-card tempo-card${cfg.tempoExercise===ex.id?" selected":""}`} onClick={()=>update({tempoExercise:ex.id})} style={{borderColor:cfg.tempoExercise===ex.id?"#FF9F43":"#1C1F27",background:cfg.tempoExercise===ex.id?"#2b1a00":"#080A0E"}}>
                 <div style={{fontSize:14,fontWeight:700,color:cfg.tempoExercise===ex.id?"#FF9F43":"#aaa",fontFamily:"'Syne',sans-serif"}}>{ex.label}</div>
                 <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{ex.desc}</div>
-                {cfg.tempoExercise===ex.id&&(
-                  <div style={{fontSize:10,color:"#FF9F43",fontFamily:"'JetBrains Mono',monospace",marginTop:6,borderTop:"1px solid #2b1a00",paddingTop:6}}>{ex.detail}</div>
-                )}
+                {cfg.tempoExercise===ex.id&&(<div style={{fontSize:10,color:"#FF9F43",fontFamily:"'JetBrains Mono',monospace",marginTop:6,borderTop:"1px solid #2b1a00",paddingTop:6}}>{ex.detail}</div>)}
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* ── STEP 5 : Aperçu ── */}
-      {step===5 && (
+      {/* ── STEP 6 : Aperçu ── */}
+      {step===6 && (
         <div>
           <div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:16,lineHeight:1.6}}>
-            Aperçu de tes deux semaines types. Elles alternent : semaine A (impaires), semaine B (paires).
+            Aperçu de tes deux semaines types. Elles alternent sur {cfg.nbWeeks} semaines.
           </div>
-
-          {/* Config recap */}
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:"#001a24",color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace"}}>
-              VMA {cfg.vma} km/h
-            </span>
-            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:INTENSITY[cfg.intensity].color+"22",color:INTENSITY[cfg.intensity].color,fontFamily:"'JetBrains Mono',monospace"}}>
-              {INTENSITY[cfg.intensity].label}
-            </span>
-            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:"#2b0d0d",color:"#FF6B6B",fontFamily:"'JetBrains Mono',monospace"}}>
-              VMA : {VMA_EXERCISES.find(e=>e.id===cfg.vmaExercise)?.label}
-            </span>
+            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:"#001a24",color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace"}}>VMA {cfg.vma} km/h</span>
+            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:"#001a24",color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace"}}>{cfg.nbWeeks} semaines</span>
+            <span style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:INTENSITY[cfg.intensity].color+"22",color:INTENSITY[cfg.intensity].color,fontFamily:"'JetBrains Mono',monospace"}}>{INTENSITY[cfg.intensity].label}</span>
           </div>
-
-          {/* Week A/B preview */}
           {previewWeeks.map(({week,sessions})=>{
             const wColor = week==="A"?"#00D2FF":"#C77DFF";
             return (
               <div key={week} style={{marginBottom:16}}>
-                <div style={{fontSize:10,color:wColor,letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block"}}>
-                  SEMAINE {week}
-                </div>
+                <div style={{fontSize:10,color:wColor,letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block"}}>SEMAINE {week}</div>
                 {sessions.map(s=>{
                   const tm=TYPEMETA[s.type]||TYPEMETA["Footing"];
                   return (
@@ -729,9 +734,8 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
               </div>
             );
           })}
-
           <div style={{marginTop:12,padding:"12px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
-            💡 Seules les séances futures non modifiées manuellement seront regénérées. Tes séances passées et personnalisées sont protégées.
+            💡 Seules les séances futures non modifiées manuellement seront regénérées.
           </div>
         </div>
       )}
@@ -742,7 +746,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
           style={{flex:1,background:"transparent",border:"1px solid #222",borderRadius:12,padding:14,color:"#888",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>
           {step===0?"ANNULER":"← RETOUR"}
         </button>
-        {step<5?(
+        {step<6?(
           <button onClick={()=>{commitPaces();setStep(s=>s+1);}}
             style={{flex:2,background:"#00D2FF",color:"#080A0E",border:"none",borderRadius:12,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
             SUIVANT →
@@ -759,10 +763,10 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// ── SETTINGS PAGE (réglages permanents) ──────────────────────────────
+// ── SETTINGS PAGE ────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════
 
-export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating }) {
+export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isRegenerating }) {
   const [paceInputs, setPaceInputs] = useState({
     ef:    fmtPace(config.paces.ef),
     tempo: fmtPace(config.paces.tempo),
@@ -788,9 +792,24 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
   };
   const SESSION_TYPES=["Endurance fondamentale","Fractionné / VMA","Tempo / Seuil","Sortie longue","Footing"];
   const DOW2NAME={0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam"};
+  const nbWeeks = config.nbWeeks || 16;
+  const endDate = addDays(TODAY_STR, nbWeeks*7);
+  const endFmt = parseDate(endDate).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"});
 
   return (
     <div>
+      {/* Durée */}
+      <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>DURÉE DU PLAN</div>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:6}}>
+        <button onClick={()=>onUpdate({nbWeeks:Math.max(1,nbWeeks-1)})} style={{border:"2px solid #1C1F27",background:"transparent",color:"#555",borderRadius:8,width:36,height:36,fontSize:16,cursor:"pointer"}}>−</button>
+        <div style={{flex:1,textAlign:"center"}}>
+          <span style={{fontSize:28,fontWeight:800,color:"#00D2FF",fontFamily:"'Syne',sans-serif"}}>{nbWeeks}</span>
+          <span style={{fontSize:12,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}> semaines</span>
+        </div>
+        <button onClick={()=>onUpdate({nbWeeks:Math.min(32,nbWeeks+1)})} style={{border:"2px solid #1C1F27",background:"transparent",color:"#555",borderRadius:8,width:36,height:36,fontSize:16,cursor:"pointer"}}>+</button>
+      </div>
+      <div style={{fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:20}}>Fin : {endFmt}</div>
+
       {/* Jours */}
       <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>JOURS DE COURSE</div>
       <div style={{display:"flex",gap:6,marginBottom:20}}>
@@ -799,18 +818,8 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
           return (
             <button key={dow} onClick={()=>{
               if(sel&&config.runDays.length<=2) return;
-              onUpdate({runDays:sel
-                ?config.runDays.filter(d=>d!==dow)
-                :[...config.runDays,dow].sort((a,b)=>{const o=[1,2,3,4,5,6,0];return o.indexOf(a)-o.indexOf(b);})
-              });
-            }} style={{
-              flex:1,border:`2px solid ${sel?"#00D2FF":"#1C1F27"}`,
-              color:sel?"#00D2FF":"#555",
-              background:sel?"#001a24":"transparent",
-              borderRadius:8,padding:"8px 4px",
-              fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace",
-            }}>{short}</button>
+              onUpdate({runDays:sel?config.runDays.filter(d=>d!==dow):[...config.runDays,dow].sort((a,b)=>{const o=[1,2,3,4,5,6,0];return o.indexOf(a)-o.indexOf(b);})});
+            }} style={{flex:1,border:`2px solid ${sel?"#00D2FF":"#1C1F27"}`,color:sel?"#00D2FF":"#555",background:sel?"#001a24":"transparent",borderRadius:8,padding:"8px 4px",fontSize:10,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{short}</button>
           );
         })}
       </div>
@@ -824,44 +833,24 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
         const wColor=isA?"#00D2FF":"#C77DFF";
         return (
           <div key={week} style={{marginBottom:16}}>
-            <div style={{fontSize:10,color:wColor,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,
-              padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block",letterSpacing:2}}>
-              SEM. {week} {isA?"(impaires)":"(paires)"}
-            </div>
+            <div style={{fontSize:10,color:wColor,fontFamily:"'JetBrains Mono',monospace",marginBottom:8,padding:"4px 10px",background:wColor+"11",borderRadius:6,display:"inline-block",letterSpacing:2}}>SEM. {week} {isA?"(impaires)":"(paires)"}</div>
             {config.runDays.map((dow,slotIdx)=>{
               const slot=tpl.find(s=>s.slot===slotIdx);
               const current=slot?.type||"Footing";
               const tm=TYPEMETA[current]||TYPEMETA["Footing"];
               return (
                 <div key={dow} style={{marginBottom:10}}>
-                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>
-                    {DOW2NAME[dow]||"?"}
-                  </div>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{DOW2NAME[dow]||"?"}</div>
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {SESSION_TYPES.map(type=>{
                       const t=TYPEMETA[type]||TYPEMETA["Footing"];
                       const isSel=current===type;
                       return (
-                        <button key={type} onClick={()=>{
-                          const newTpl=tpl.filter(s=>s.slot!==slotIdx);
-                          newTpl.push({slot:slotIdx,type});
-                          onUpdate({[tplKey]:newTpl});
-                        }} style={{
-                          border:`2px solid ${isSel?t.color:"#1C1F27"}`,
-                          background:isSel?t.color+"22":"transparent",
-                          color:isSel?t.color:"#555",
-                          borderRadius:8,padding:"5px 8px",
-                          fontSize:9,cursor:"pointer",
-                          fontFamily:"'JetBrains Mono',monospace",
-                        }}>
-                          {type.split(' ')[0]}
-                        </button>
+                        <button key={type} onClick={()=>{const newTpl=tpl.filter(s=>s.slot!==slotIdx);newTpl.push({slot:slotIdx,type});onUpdate({[tplKey]:newTpl});}} style={{border:`2px solid ${isSel?t.color:"#1C1F27"}`,background:isSel?t.color+"22":"transparent",color:isSel?t.color:"#555",borderRadius:8,padding:"5px 8px",fontSize:9,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{type.split(' ')[0]}</button>
                       );
                     })}
                   </div>
-                  <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
-                    {tm.icon} {current}
-                  </div>
+                  <div style={{fontSize:10,color:tm.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{tm.icon} {current}</div>
                 </div>
               );
             })}
@@ -880,12 +869,7 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
         ].map(({key,label,color})=>(
           <div key={key}>
             <div style={{fontSize:9,color,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{label} /km</div>
-            <input style={{
-              background:"#080A0E",border:`1px solid ${color}33`,
-              color:"#E8E4DC",borderRadius:8,padding:"8px 10px",
-              fontSize:13,fontFamily:"'JetBrains Mono',monospace",
-              width:"100%",outline:"none",
-            }}
+            <input style={{background:"#080A0E",border:`1px solid ${color}33`,color:"#E8E4DC",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"'JetBrains Mono',monospace",width:"100%",outline:"none"}}
               value={paceInputs[key]}
               onChange={e=>setPaceInputs(p=>({...p,[key]:e.target.value}))}
               onBlur={commitPaces}
@@ -898,16 +882,7 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
       <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>INTENSITÉ</div>
       <div style={{display:"flex",gap:6,marginBottom:20}}>
         {Object.entries(INTENSITY).map(([key,conf])=>(
-          <button key={key} onClick={()=>onUpdate({intensity:key})}
-            style={{
-              flex:1,border:`2px solid ${config.intensity===key?conf.color:"#1C1F27"}`,
-              background:config.intensity===key?conf.color+"22":"transparent",
-              color:config.intensity===key?conf.color:"#555",
-              borderRadius:10,padding:"8px 4px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace",
-            }}>
-            {conf.label}
-          </button>
+          <button key={key} onClick={()=>onUpdate({intensity:key})} style={{flex:1,border:`2px solid ${config.intensity===key?conf.color:"#1C1F27"}`,background:config.intensity===key?conf.color+"22":"transparent",color:config.intensity===key?conf.color:"#555",borderRadius:10,padding:"8px 4px",fontSize:10,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{conf.label}</button>
         ))}
       </div>
 
@@ -915,16 +890,7 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
       <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>FORMAT VMA</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
         {VMA_EXERCISES.map(ex=>(
-          <button key={ex.id} onClick={()=>onUpdate({vmaExercise:ex.id})}
-            style={{
-              border:`2px solid ${config.vmaExercise===ex.id?"#FF6B6B":"#1C1F27"}`,
-              background:config.vmaExercise===ex.id?"#2b0d0d":"transparent",
-              color:config.vmaExercise===ex.id?"#FF6B6B":"#555",
-              borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace",
-            }}>
-            {ex.label}
-          </button>
+          <button key={ex.id} onClick={()=>onUpdate({vmaExercise:ex.id})} style={{border:`2px solid ${config.vmaExercise===ex.id?"#FF6B6B":"#1C1F27"}`,background:config.vmaExercise===ex.id?"#2b0d0d":"transparent",color:config.vmaExercise===ex.id?"#FF6B6B":"#555",borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{ex.label}</button>
         ))}
       </div>
 
@@ -932,30 +898,13 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
       <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>FORMAT TEMPO</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:24}}>
         {TEMPO_EXERCISES.map(ex=>(
-          <button key={ex.id} onClick={()=>onUpdate({tempoExercise:ex.id})}
-            style={{
-              border:`2px solid ${config.tempoExercise===ex.id?"#FF9F43":"#1C1F27"}`,
-              background:config.tempoExercise===ex.id?"#2b1a00":"transparent",
-              color:config.tempoExercise===ex.id?"#FF9F43":"#555",
-              borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",
-              fontFamily:"'JetBrains Mono',monospace",
-            }}>
-            {ex.label}
-          </button>
+          <button key={ex.id} onClick={()=>onUpdate({tempoExercise:ex.id})} style={{border:`2px solid ${config.tempoExercise===ex.id?"#FF9F43":"#1C1F27"}`,background:config.tempoExercise===ex.id?"#2b1a00":"transparent",color:config.tempoExercise===ex.id?"#FF9F43":"#555",borderRadius:8,padding:"6px 10px",fontSize:10,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{ex.label}</button>
         ))}
       </div>
 
       {/* Regenerate */}
-      <button onClick={onRegenerate} style={{
-        width:"100%",background:"#00D2FF",color:"#080A0E",border:"none",
-        borderRadius:12,padding:16,fontSize:13,fontWeight:700,cursor:"pointer",
-        fontFamily:"'JetBrains Mono',monospace",
-        display:"flex",alignItems:"center",justifyContent:"center",gap:8,
-      }}>
-        {isRegenerating
-          ?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>↻</span>
-          :"⚡ REGÉNÉRER LES SEMAINES FUTURES"
-        }
+      <button onClick={onRegenerate} style={{width:"100%",background:"#00D2FF",color:"#080A0E",border:"none",borderRadius:12,padding:16,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+        {isRegenerating?<span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>↻</span>:"⚡ REGÉNÉRER LES SEMAINES FUTURES"}
       </button>
       <div style={{fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:8,textAlign:"center"}}>
         Seules les séances futures générées automatiquement seront modifiées.<br/>
