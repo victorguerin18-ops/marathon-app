@@ -494,8 +494,7 @@ export default function App() {
   }
 
   async function deleteJournalEntry(entry){
-    if(!window.confirm("Supprimer cette séance du journal ?
-Si elle était planifiée, elle repassera en 'à faire'.")) return;
+    if(!window.confirm("Supprimer cette séance du journal ? Si elle était planifiée, elle repassera en 'à faire'.")) return;
     await deleteDone(entry.id);
     setDone(prev=>prev.filter(r=>r.id!==entry.id));
     // Si liée à une séance planifiée, on ne touche à rien — elle redevient automatiquement "à faire"
