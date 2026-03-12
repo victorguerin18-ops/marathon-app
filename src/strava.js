@@ -31,7 +31,8 @@ export async function fetchActivities(accessToken) {
     .filter(a => a.type === 'Run')
     .map(a => ({
       id: 'strava_' + a.id,
-      date: a.start_date_local.slice(0, 10),
+      date: a.start_date_local.slice(0, 10).replace(/-/g, '/'),
+
       type: guessType(a),
       dist: Math.round(a.distance / 100) / 10,
       dur: Math.round(a.moving_time / 60),
