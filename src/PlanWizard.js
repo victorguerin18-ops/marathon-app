@@ -889,7 +889,7 @@ export function PlanSettings({ config, onUpdate, onRegenerate, isRegenerating })
               value={paceInputs[key]}
               onChange={e=>setPaceInputs(p=>({...p,[key]:e.target.value}))}
               onBlur={commitPaces}
-              placeholder="ex: 5'30\""/>
+              placeholder="ex: 5'30"/>
           </div>
         ))}
       </div>
