@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities } from './strava';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone } from './db';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────
 const MARATHON_DATE = "2026-10-25";
@@ -86,7 +86,6 @@ function scoreSession(planned,done) {
 function generatePlan(existingPlanned, vma=VMA_KMH) {
   const sessions = [];
   const startDate = TODAY_STR;
-  const endDate   = MARATHON_DATE;
 
   // Jours préférés par défaut : Mardi=2, Jeudi=4, Samedi=6, Dimanche=0
   const DAYS = [2,4,6,0]; // getDay() values
@@ -109,7 +108,6 @@ function generatePlan(existingPlanned, vma=VMA_KMH) {
     // Don't overwrite existing
     if(existing.has(dateStr)) { cur.setDate(cur.getDate()+1); continue; }
 
-    const totalWeeks = 32;
     const w = weekNum;
     const phase = w<=8?"base": w<=20?"specific": w<=28?"marathon": w<=31?"taper":"race";
     const isEvalWeek = [0,6,12,18,24].includes(w);
