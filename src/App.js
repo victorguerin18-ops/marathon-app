@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities } from './strava';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned } from './db';
+import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace, vmaToMinKm } from './PlanWizard';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────
 const MARATHON_DATE = "2026-10-25";
@@ -10,174 +11,19 @@ const TODAY_STR     = "2026-03-11";
 const DAYS_LEFT     = Math.ceil((MARATHON - TODAY) / 86400000);
 const WEEKS_LEFT    = Math.floor(DAYS_LEFT / 7);
 
-// VMA & allures calculées (km/h → min/km)
-const VMA_KMH       = 15.24;
-const toMinKm       = (pct) => { const kmh = VMA_KMH * pct; return 60 / kmh; }; // min/km
-const fmtAllure     = (minKm) => { const m = Math.floor(minKm); const s = Math.round((minKm - m) * 60); return `${m}'${String(s).padStart(2,'0')}"` };
 
-// Zones d'allure basées VMA
-const ZONES = {
-  EF:     { pctMin:0.65, pctMax:0.75, label:"Endurance fondamentale", color:"#6BF178" },
-  TEMPO:  { pctMin:0.85, pctMax:0.90, label:"Tempo / Seuil",          color:"#FF9F43" },
-  VMA:    { pctMin:0.95, pctMax:1.05, label:"Fractionné / VMA",       color:"#FF6B6B" },
-  SL:     { pctMin:0.60, pctMax:0.70, label:"Sortie longue",          color:"#C77DFF" },
-};
+const VMA_DEFAULT = 15.24;
 
 const TYPE_META = {
   "Footing":               { color:"#A8DADC", dark:"#0d1f20", icon:"〜",   desc:"Run libre, pas structuré" },
-  "Endurance fondamentale":{ color:"#6BF178", dark:"#0d2b0f", icon:"◈",   desc:`Zone 2 · ${fmtAllure(toMinKm(0.70))}–${fmtAllure(toMinKm(0.65))}/km` },
-  "Tempo / Seuil":         { color:"#FF9F43", dark:"#2b1a00", icon:"◇",   desc:`Seuil · ${fmtAllure(toMinKm(0.90))}–${fmtAllure(toMinKm(0.85))}/km` },
-  "Fractionné / VMA":      { color:"#FF6B6B", dark:"#2b0d0d", icon:"▲▲",  desc:`VMA · ${fmtAllure(toMinKm(1.05))}–${fmtAllure(toMinKm(0.95))}/km` },
-  "Sortie longue":         { color:"#C77DFF", dark:"#1e0d2b", icon:"◈◈◈", desc:`Endurance · ${fmtAllure(toMinKm(0.70))}–${fmtAllure(toMinKm(0.60))}/km` },
+  "Endurance fondamentale":{ color:"#6BF178", dark:"#0d2b0f", icon:"◈",   desc:"Zone 2 · allure EF" },
+  "Tempo / Seuil":         { color:"#FF9F43", dark:"#2b1a00", icon:"◇",   desc:"Seuil lactique" },
+  "Fractionné / VMA":      { color:"#FF6B6B", dark:"#2b0d0d", icon:"▲▲",  desc:"Intervalles intenses" },
+  "Sortie longue":         { color:"#C77DFF", dark:"#1e0d2b", icon:"◈◈◈", desc:"Endurance longue distance" },
   "Course":                { color:"#FFD700", dark:"#2b2200", icon:"🏅",  desc:"Compétition chronométrée" },
-  "Évaluation VMA":        { color:"#00D2FF", dark:"#001f2b", icon:"⚡",  desc:"Test Cooper ou 6min · Recalibrage VMA" },
+  "Évaluation VMA":        { color:"#00D2FF", dark:"#001f2b", icon:"⚡",  desc:"Test 6 min · Recalibrage VMA" },
 };
 
-const FEELINGS = ["😣","😕","😐","🙂","😄"];
-
-const STORE = {
-  get: (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
-  set: (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-};
-
-// ─── DATE HELPERS ────────────────────────────────────────────────────
-function parseDate(str) {
-  const [y,m,d] = str.split('-'); return new Date(+y, +m-1, +d);
-}
-function addDays(dateStr, n) {
-  const dt = parseDate(dateStr); dt.setDate(dt.getDate()+n);
-  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-}
-function wkKey(dateStr) {
-  const dt = parseDate(dateStr); const day = dt.getDay()||7;
-  const mon = new Date(dt); mon.setDate(dt.getDate()-day+1);
-  return `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`;
-}
-function fmtDate(d, opts={weekday:"short",day:"numeric",month:"short"}) {
-  const [y,m,day]=d.split('-'); return new Date(+y,+m-1,+day).toLocaleDateString("fr-FR",opts);
-}
-function isToday(d)  { return d === TODAY_STR; }
-function isFuture(d) { return parseDate(d) > TODAY; }
-function isPast(d)   { return parseDate(d) < TODAY; }
-
-function pace(dist,dur) {
-  if(!dist||!dur) return "--'--\"";
-  const s=(dur*60)/dist;
-  return `${Math.floor(s/60)}'${String(Math.round(s%60)).padStart(2,"0")}"`;
-}
-function scoreSession(planned,done) {
-  if(!planned||!done) return null;
-  const d=Math.max(0,100-Math.abs(done.dist-planned.targetDist)/planned.targetDist*100);
-  const t=Math.max(0,100-Math.abs(done.dur-planned.targetDur)/planned.targetDur*100);
-  const h=planned.targetHR&&done.hr?Math.max(0,100-Math.abs(done.hr-planned.targetHR)/planned.targetHR*100):100;
-  return Math.round(d*0.4+t*0.3+h*0.3);
-}
-
-// ─── PLAN GENERATOR ──────────────────────────────────────────────────
-/*
-  Phases (basées sur 32 semaines restantes) :
-  S1–S8   : Base aérobie (EF + Footing + 1 VMA léger + SL progressive)
-  S9–S20  : Préparation spécifique (Tempo + VMA intensif + SL longue)
-  S21–S28 : Marathon spécifique (allure marathon + SL max 35km)
-  S29–S31 : Affûtage (réduction volume 30%)
-  S32     : Semaine de course
-  S1/S7/S13/S19/S25 : Évaluation VMA (toutes les ~6 sem)
-*/
-function generatePlan(existingPlanned, vma=VMA_KMH) {
-  const sessions = [];
-  const startDate = TODAY_STR;
-
-  // Jours préférés par défaut : Mardi=2, Jeudi=4, Samedi=6, Dimanche=0
-  const DAYS = [2,4,6,0]; // getDay() values
-
-  let cur = new Date(parseDate(startDate));
-  cur.setDate(cur.getDate()+1); // start tomorrow
-
-  const existing = new Set(existingPlanned.map(p=>p.date));
-  let weekNum = 0;
-  let lastMonday = wkKey(startDate);
-
-  while(cur <= MARATHON) {
-    const dateStr = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
-    const curWk = wkKey(dateStr);
-    if(curWk !== lastMonday) { weekNum++; lastMonday = curWk; }
-
-    const dow = cur.getDay(); // 0=Sun,1=Mon,...6=Sat
-    if(!DAYS.includes(dow)) { cur.setDate(cur.getDate()+1); continue; }
-
-    // Don't overwrite existing
-    if(existing.has(dateStr)) { cur.setDate(cur.getDate()+1); continue; }
-
-    const w = weekNum;
-    const phase = w<=8?"base": w<=20?"specific": w<=28?"marathon": w<=31?"taper":"race";
-    const isEvalWeek = [0,6,12,18,24].includes(w);
-    const dayIndex = DAYS.indexOf(dow); // 0-3 within week
-
-    // Scale VMA from provided value
-    const efMin   = fmtAllure(60/(vma*0.65));
-    const efMax   = fmtAllure(60/(vma*0.75));
-    const tempoMin= fmtAllure(60/(vma*0.85));
-    const tempoMax= fmtAllure(60/(vma*0.90));
-    const vmaMin  = fmtAllure(60/(vma*0.95));
-    const vmaMax  = fmtAllure(60/(vma*1.05));
-    const slMin   = fmtAllure(60/(vma*0.60));
-    const slMax   = fmtAllure(60/(vma*0.70));
-
-    let session = null;
-
-    if(phase === "base") {
-      const slDist = Math.min(14+w*0.8, 22);
-      if(dayIndex===0) session={type:"Endurance fondamentale",targetDist:10,targetDur:82, targetHR:148, notes:`Zone 2 · ${efMax}–${efMin}/km · FC 140–150`};
-      if(dayIndex===1) session=isEvalWeek&&dow===4
-        ? {type:"Évaluation VMA",targetDist:6,targetDur:40,targetHR:null,notes:"Test 6 min à fond sur piste · Mesure distance = recalibrer VMA"}
-        : {type:"Fractionné / VMA",targetDist:8,targetDur:52,targetHR:170,notes:`6×3min à ${vmaMin}–${vmaMax}/km · récup 90s trot`};
-      if(dayIndex===2) session={type:"Footing",targetDist:8,targetDur:56,targetHR:140,notes:"Footing récupération · très léger"};
-      if(dayIndex===3) session={type:"Sortie longue",targetDist:Math.round(slDist),targetDur:Math.round(slDist/((vma*0.65)/60)),targetHR:145,notes:`Sortie longue · ${slMax}–${slMin}/km · rester en zone 2`};
-    }
-
-    if(phase === "specific") {
-      const slDist = Math.min(22+((w-8)*0.8), 32);
-      const wInPhase = w-8;
-      if(dayIndex===0) session={type:"Endurance fondamentale",targetDist:12,targetDur:98,targetHR:148,notes:`Zone 2 · ${efMax}–${efMin}/km`};
-      if(dayIndex===1) session=isEvalWeek
-        ? {type:"Évaluation VMA",targetDist:6,targetDur:40,targetHR:null,notes:"Test 6 min · Recalibrage VMA"}
-        : wInPhase%3===0
-          ? {type:"Tempo / Seuil",targetDist:10,targetDur:65,targetHR:165,notes:`3×10min à ${tempoMin}–${tempoMax}/km · récup 3min`}
-          : {type:"Fractionné / VMA",targetDist:10,targetDur:62,targetHR:175,notes:`8×3min à ${vmaMin}–${vmaMax}/km · récup 90s`};
-      if(dayIndex===2) session={type:"Endurance fondamentale",targetDist:10,targetDur:82,targetHR:145,notes:"EF milieu de semaine"};
-      if(dayIndex===3) session={type:"Sortie longue",targetDist:Math.round(slDist),targetDur:Math.round(slDist/((vma*0.63)/60)),targetHR:148,notes:`SL progressive · derniers 5km à allure marathon ${tempoMax}`};
-    }
-
-    if(phase === "marathon") {
-      const slDist = Math.min(30+((w-20)*0.6), 35);
-      const amPace = fmtAllure(60/(vma*0.78)); // allure marathon ~sub3h30
-      if(dayIndex===0) session={type:"Endurance fondamentale",targetDist:14,targetDur:112,targetHR:148,notes:`Zone 2 · ${efMax}–${efMin}/km`};
-      if(dayIndex===1) session={type:"Tempo / Seuil",targetDist:12,targetDur:74,targetHR:168,notes:`Allure marathon : ${amPace}/km · 2×20min`};
-      if(dayIndex===2) session={type:"Footing",targetDist:10,targetDur:70,targetHR:140,notes:"Récupération active"};
-      if(dayIndex===3) session={type:"Sortie longue",targetDist:Math.round(slDist),targetDur:Math.round(slDist/((vma*0.65)/60)),targetHR:150,notes:`SL max · ${slMax}–${slMin}/km · conservation d'énergie`};
-    }
-
-    if(phase === "taper") {
-      const factor = w<=29?0.7:0.5;
-      if(dayIndex===0) session={type:"Endurance fondamentale",targetDist:Math.round(10*factor),targetDur:Math.round(82*factor),targetHR:145,notes:"Affûtage · volume réduit · garder l'intensité"};
-      if(dayIndex===1) session={type:"Fractionné / VMA",targetDist:Math.round(8*factor),targetDur:Math.round(52*factor),targetHR:170,notes:`Courtes répétitions · 4×3min à ${vmaMin}/km · rester vif`};
-      if(dayIndex===2) session={type:"Footing",targetDist:Math.round(6*factor),targetDur:Math.round(42*factor),targetHR:135,notes:"Footing léger · jambes fraîches"};
-      if(dayIndex===3) session={type:"Sortie longue",targetDist:Math.round(18*factor),targetDur:Math.round(130*factor),targetHR:145,notes:"SL affûtage · court mais soutenu"};
-    }
-
-    if(phase==="race" && dateStr===MARATHON_DATE) {
-      session={type:"Course",targetDist:42.195,targetDur:210,targetHR:null,notes:"🏅 MARATHON DE LILLE · Objectif Sub-3h30 · Allure 4'58\"/km"};
-    }
-
-    if(session) {
-      sessions.push({ id:`plan-${dateStr}-${dayIndex}`, date:dateStr, ...session, generated:true });
-    }
-
-    cur.setDate(cur.getDate()+1);
-  }
-
-  return sessions;
-}
 
 // ─── CHARTS ──────────────────────────────────────────────────────────
 function Chart({ data, color, formatY, smooth }) {
@@ -268,8 +114,11 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("");
   const [editForm,  setEditForm]  = useState(null);
 
-  // VMA (recalibrable)
-  const [vma, setVma] = useState(()=>STORE.get("vma",VMA_KMH));
+  // Plan config (wizard)
+  const [planConfig, setPlanConfig] = useState(()=>STORE.get("plan_config",null)||defaultConfig(VMA_DEFAULT));
+  const [showWizard, setShowWizard] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [planGenLoading, setPlanGenLoading] = useState(false);
 
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
@@ -285,10 +134,6 @@ export default function App() {
   const [coachLoading,setCoachLoading]=useState(false);
   const [chatHistory, setChatHistory]=useState(()=>STORE.get("coach_chat",[]));
   const [chatInput,  setChatInput]  = useState("");
-
-  // Plan gen state
-  const [planGenLoading, setPlanGenLoading] = useState(false);
-  const [planGenDone,    setPlanGenDone]    = useState(false);
 
   useEffect(()=>{
     async function init(){
@@ -328,21 +173,37 @@ export default function App() {
     setTimeout(()=>setSyncStatus(""),3000); setStravaLoading(false);
   }
 
-  // ── Generate plan ──────────────────────────────────────────────────
-  async function generateAndSavePlan(){
+  // ── Generate plan from config ─────────────────────────────────────
+  async function generateAndSavePlan(cfg){
     setPlanGenLoading(true);
-    const sessions = generatePlan(planned, vma);
-    // Save all to Supabase
-    for(const s of sessions){
-      await savePlanned(s);
-    }
+    const config = cfg || planConfig;
+    // Delete existing generated future sessions
+    const toDelete = planned.filter(p=>p.generated && parseDate(p.date) > parseDate(TODAY_STR));
+    for(const p of toDelete){ await deletePlanned(p.id); }
+    // Generate new sessions
+    const sessions = generatePlanFromConfig(config, planned.filter(p=>!p.generated));
+    for(const s of sessions){ await savePlanned(s); }
     setPlanned(prev=>{
-      const ids=new Set(prev.map(p=>p.id));
-      return [...prev, ...sessions.filter(s=>!ids.has(s.id))];
+      const kept = prev.filter(p=>!p.generated || parseDate(p.date) <= parseDate(TODAY_STR));
+      const ids = new Set(kept.map(p=>p.id));
+      return [...kept, ...sessions.filter(s=>!ids.has(s.id))];
     });
     setPlanGenLoading(false);
-    setPlanGenDone(true);
-    setTimeout(()=>setPlanGenDone(false),4000);
+    setShowWizard(false);
+    setShowSettings(false);
+  }
+
+  function handleWizardComplete(cfg){
+    const updated = {...planConfig, ...cfg};
+    setPlanConfig(updated);
+    STORE.set("plan_config", updated);
+    generateAndSavePlan(updated);
+  }
+
+  function handleSettingsUpdate(patch){
+    const updated = {...planConfig, ...patch};
+    setPlanConfig(updated);
+    STORE.set("plan_config", updated);
   }
 
   // ── Coach IA ───────────────────────────────────────────────────────
@@ -365,7 +226,7 @@ export default function App() {
 PROFIL :
 - Prénom : Victor
 - Objectif : Marathon de Lille, 25 octobre 2026 (${DAYS_LEFT} jours restants, ${WEEKS_LEFT} semaines)
-- VMA actuelle : ${vma} km/h
+- VMA actuelle : ${planConfig.vma} km/h
 - Objectif de temps : Sub-3h30 (allure cible ~4'58"/km)
 - Premier marathon
 - 4 séances/semaine (flexible)
@@ -375,12 +236,12 @@ DONNÉES RÉCENTES :
 - Total km depuis début : ${totalKm.toFixed(0)} km
 - Dernières 4 semaines :
 ${wkList.map(([wk,d])=>`  ${wk}: ${d.dist.toFixed(1)}km en ${d.runs} séances, RPE moyen ${(d.rpe.reduce((s,v)=>s+v,0)/d.rpe.length).toFixed(1)}`).join('\n')}
-- Dernière allure EF : ${lastPace?`${fmtAllure(lastPace)}/km`:"pas encore de données"}
+- Dernière allure EF : ${lastPace?`${fmtPace(lastPace)}/km`:"pas encore de données"}
 
-ZONES D'ALLURE (basées VMA ${vma} km/h) :
-- Endurance fondamentale (65–75%) : ${fmtAllure(toMinKm(0.75))}–${fmtAllure(toMinKm(0.65))}/km
-- Tempo/Seuil (85–90%) : ${fmtAllure(toMinKm(0.90))}–${fmtAllure(toMinKm(0.85))}/km
-- VMA (95–105%) : ${fmtAllure(toMinKm(1.05))}–${fmtAllure(toMinKm(0.95))}/km
+ZONES D'ALLURE (basées VMA ${planConfig.vma} km/h) :
+- Endurance fondamentale : ${fmtPace(planConfig.paces.ef)}/km
+- Tempo/Seuil : ${fmtPace(planConfig.paces.tempo)}/km
+- VMA : ${fmtPace(planConfig.paces.vma)}/km
 - Allure marathon sub-3h30 : ~4'58"/km
 
 SÉANCES RÉCENTES (20 dernières) :
@@ -611,7 +472,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
             <span style={{fontSize:14,color:"#333",margin:"0 6px"}}>·</span>
             {WEEKS_LEFT}<span style={{fontSize:14,color:"#555",fontWeight:400,marginLeft:4}}>sem.</span>
           </div>
-          <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026 · VMA {vma} km/h</div>
+          <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026 · VMA {planConfig.vma} km/h</div>
         </div>
         <div style={{display:"flex",gap:8}}>
           <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:10,padding:"8px 14px",fontSize:12,fontFamily:"'JetBrains Mono',monospace"}}>+ PLANIFIER</button>
@@ -783,72 +644,101 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* ═══ PLAN ═══ */}
         {view==="plan" && (
           <div className="fade-up">
-            {/* Plan generator */}
-            <div className="card" style={{padding:22,marginBottom:16,border:"1px solid #00D2FF22",background:"#001a24"}}>
-              <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>⚡ PLAN INTELLIGENT · VMA {vma} km/h</div>
-              <div style={{fontSize:13,color:"#aaa",fontFamily:"'JetBrains Mono',monospace",marginBottom:4,lineHeight:1.6}}>
-                Génère 32 semaines de séances calibrées sur ta VMA jusqu'au marathon.<br/>
-                <span style={{color:"#555",fontSize:11}}>Phases : Base (S1–8) · Spécifique (S9–20) · Marathon (S21–28) · Affûtage (S29–31)</span>
-              </div>
 
-              {/* Allures recap */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"12px 0"}}>
-                {Object.entries(ZONES).map(([k,z])=>(
-                  <span key={k} className="pill" style={{background:"#0d1f20",color:z.color,fontSize:10}}>
-                    {fmtAllure(toMinKm(z.pctMin))}–{fmtAllure(toMinKm(z.pctMax))}/km · {z.label.split(' ')[0]}
-                  </span>
-                ))}
-              </div>
-
-              <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12}}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA (km/h)</div>
-                  <input type="number" step="0.1" className="inp" value={vma}
-                    onChange={e=>{const v=parseFloat(e.target.value); if(v>0){setVma(v);STORE.set("vma",v);}}}
-                    style={{width:"100%"}}/>
-                </div>
-                <button onClick={generateAndSavePlan} className="btn-primary"
-                  style={{background:"#00D2FF",color:"#080A0E",borderRadius:12,padding:"14px 18px",fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",marginTop:14,flexShrink:0}}>
-                  {planGenLoading?<span className="spin">↻</span>:planGenDone?"✓ GÉNÉRÉ !":"⚡ GÉNÉRER"}
-                </button>
-              </div>
-            </div>
-
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{fontSize:11,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>PLANNING ({planned.length} SÉANCES)</div>
-              <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>+ AJOUTER</button>
-            </div>
-
-            {[...planned].sort((a,b)=>a.date.localeCompare(b.date)).map(p=>{
-              const tm=TYPE_META[p.type]||TYPE_META["Footing"];
-              const linked=done.find(d=>d.plannedId===p.id);
-              const score=linked?scoreSession(p,linked):null;
-              const past=isPast(p.date); const today=isToday(p.date);
-              return (
-                <div key={p.id} className="card" style={{padding:"16px 18px",marginBottom:8,opacity:past&&!linked?0.45:1,borderLeft:`3px solid ${today?tm.color:linked?"#4ECDC4":"#1C1F27"}`}}>
-                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                    <div style={{width:44,height:44,borderRadius:10,background:tm.dark,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{tm.icon}</div>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-                        <span style={{fontSize:11,color:today?"#FFE66D":past?"#555":"#aaa",fontFamily:"'JetBrains Mono',monospace"}}>{today?"AUJOURD'HUI":fmtDate(p.date,{weekday:"short",day:"numeric",month:"short"})}</span>
-                        {linked&&<span style={{fontSize:9,color:"#4ECDC4",fontFamily:"'JetBrains Mono',monospace"}}>✓ FAIT</span>}
-                        {p.generated&&!linked&&<span style={{fontSize:9,color:"#00D2FF55",fontFamily:"'JetBrains Mono',monospace"}}>AUTO</span>}
-                      </div>
-                      <div style={{fontSize:15,fontWeight:700}}>{p.type} · {p.targetDist} km</div>
-                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>~{p.targetDur} min{p.targetHR?` · FC ${p.targetHR}`:""}</div>
+            {/* Plan header */}
+            {!showSettings ? (
+              <>
+                {/* Config summary card */}
+                <div className="card" style={{padding:20,marginBottom:14,border:"1px solid #00D2FF22",background:"linear-gradient(135deg,#001a24,#080A0E)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>⚡ PLAN ACTIF</div>
+                      <div style={{fontSize:16,fontWeight:800}}>VMA {planConfig.vma} km/h · {planConfig.intensity === "soft" ? "Douce" : planConfig.intensity === "ambitious" ? "Ambitieuse" : "Standard"}</div>
+                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{planned.filter(p=>p.generated).length} séances générées · {planned.filter(p=>p.generated&&parseDate(p.date)>parseDate(TODAY_STR)).length} restantes</div>
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
-                      {score!==null
-                        ?<div style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}</div><div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>SCORE</div></div>
-                        :!past&&<button className="btn-ghost" onClick={()=>logSession(p)} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>LOG</button>
-                      }
+                    <div style={{display:"flex",gap:8"}}>
+                      <button onClick={()=>setShowSettings(true)} className="btn-ghost" style={{borderRadius:10,padding:"8px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>⚙ RÉGLAGES</button>
                     </div>
                   </div>
-                  {p.notes&&<div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:8,lineHeight:1.5}}>💬 {p.notes}</div>}
-                  {linked&&<CompareBar planned={p} done={linked}/>}
+
+                  {/* Allures pills */}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                    {[
+                      {label:"EF",pace:planConfig.paces.ef,color:"#6BF178"},
+                      {label:"SL",pace:planConfig.paces.sl,color:"#C77DFF"},
+                      {label:"Tempo",pace:planConfig.paces.tempo,color:"#FF9F43"},
+                      {label:"VMA",pace:planConfig.paces.vma,color:"#FF6B6B"},
+                    ].map(({label,pace,color})=>(
+                      <span key={label} style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:color+"11",color,fontFamily:"'JetBrains Mono',monospace",border:`1px solid ${color}33`}}>
+                        {label} · {fmtPace(pace)}/km
+                      </span>
+                    ))}
+                  </div>
+
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>setShowWizard(true)} className="btn-ghost" style={{flex:1,borderRadius:10,padding:"10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace",textAlign:"center"}}>
+                      🔄 NOUVEAU PLAN
+                    </button>
+                    <button onClick={()=>generateAndSavePlan(planConfig)} className="btn-primary"
+                      style={{flex:2,background:"#00D2FF",color:"#080A0E",borderRadius:10,padding:"10px",fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",border:"none",cursor:"pointer"}}>
+                      {planGenLoading?<span className="spin">↻</span>:"⚡ REGÉNÉRER"}
+                    </button>
+                  </div>
                 </div>
-              );
-            })}
+
+                {/* Session list */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>PLANNING · {planned.filter(p=>isFuture(p.date)).length} À VENIR</div>
+                  <button className="btn-ghost" onClick={()=>setModal({type:"plan"})} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>+ AJOUTER</button>
+                </div>
+
+                {[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||done.find(d=>d.plannedId===p.id)).map(p=>{
+                  const tm=TYPE_META[p.type]||TYPE_META["Footing"];
+                  const linked=done.find(d=>d.plannedId===p.id);
+                  const score=linked?scoreSession(p,linked):null;
+                  const today=isToday(p.date);
+                  return (
+                    <div key={p.id} className="card" style={{padding:"16px 18px",marginBottom:8,borderLeft:`3px solid ${today?tm.color:linked?"#4ECDC4":p.generated?"#00D2FF22":"#1C1F27"}`}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        <div style={{width:44,height:44,borderRadius:10,background:tm.dark,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{tm.icon}</div>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                            <span style={{fontSize:11,color:today?"#FFE66D":"#aaa",fontFamily:"'JetBrains Mono',monospace"}}>{today?"AUJOURD'HUI":fmtDate(p.date,{weekday:"short",day:"numeric",month:"short"})}</span>
+                            {linked&&<span style={{fontSize:9,color:"#4ECDC4",fontFamily:"'JetBrains Mono',monospace"}}>✓ FAIT</span>}
+                            {p.generated&&!linked&&<span style={{fontSize:9,color:"#00D2FF55",fontFamily:"'JetBrains Mono',monospace"}}>AUTO</span>}
+                          </div>
+                          <div style={{fontSize:15,fontWeight:700}}>{p.type} · {p.targetDist} km</div>
+                          <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>~{p.targetDur} min{p.targetHR?` · FC ${p.targetHR}`:""}</div>
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                          {score!==null
+                            ?<div style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}</div><div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>SCORE</div></div>
+                            :<button className="btn-ghost" onClick={()=>logSession(p)} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>LOG</button>
+                          }
+                        </div>
+                      </div>
+                      {p.notes&&<div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:8,lineHeight:1.5}}>💬 {p.notes}</div>}
+                      {linked&&<CompareBar planned={p} done={linked}/>}
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              /* ── SETTINGS ── */
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                  <div style={{fontSize:18,fontWeight:800}}>Réglages du plan</div>
+                  <button onClick={()=>setShowSettings(false)} style={{background:"transparent",border:"none",color:"#555",fontSize:20,cursor:"pointer"}}>✕</button>
+                </div>
+                <PlanSettings
+                  config={planConfig}
+                  onUpdate={handleSettingsUpdate}
+                  onRegenerate={()=>generateAndSavePlan(planConfig)}
+                  onOpenWizard={()=>{setShowSettings(false);setShowWizard(true);}}
+                  isRegenerating={planGenLoading}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -875,7 +765,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               {/* Stats rapides */}
               <div style={{display:"flex",gap:8}}>
                 {[
-                  ["VMA",`${vma} km/h`,"#00D2FF"],
+                  ["VMA",`${planConfig.vma} km/h`,"#00D2FF"],
                   ["ALLURE CIBLE","4'58\"/km","#FFE66D"],
                   ["KM TOTAL",`${totalKm.toFixed(0)}km`,"#6BF178"],
                 ].map(([l,v,c])=>(
@@ -930,7 +820,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   {coachLoading?<span className="spin" style={{color:"#080A0E",fontSize:14}}>↻</span>:"→"}
                 </button>
               </div>
-              <div style={{fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:6,textAlign:"center"}}>Propulsé par Claude · Données Strava · VMA {vma} km/h</div>
+              <div style={{fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:6,textAlign:"center"}}>Propulsé par Claude · Données Strava · VMA {planConfig.vma} km/h</div>
             </div>
           </div>
         )}
@@ -1136,6 +1026,20 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
           </button>
         ))}
       </div>
+
+      {/* WIZARD MODAL */}
+      {showWizard&&(
+        <div onClick={()=>setShowWizard(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(8px)"}}>
+          <div onClick={e=>e.stopPropagation()} className="pop" style={{width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto"}}>
+            <PlanWizard
+              vma={planConfig.vma}
+              initialConfig={planConfig}
+              onComplete={handleWizardComplete}
+              onCancel={()=>setShowWizard(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* MODALS */}
       {modal&&(
