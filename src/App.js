@@ -1092,7 +1092,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                     </div>
                   );
                 })}
-                      </div> {/* fin semaine */}
+                      </div>
                     );
                   });
                 })()}
