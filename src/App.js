@@ -186,7 +186,6 @@ function VMAModal({ done, currentVMA, onClose }) {
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {rows.map(({ type, meta, data }) => {
             const hasData = !!data;
-            const barWidth = hasData ? Math.min((data.avgPace / (3600 / data.vmaEstimate * (1/meta.ratio))) * 100, 100) : 0;
 
             return (
               <div
