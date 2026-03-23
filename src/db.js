@@ -59,3 +59,21 @@ export async function deleteDone(id) {
   const { error } = await supabase.from('done').delete().eq('id', id);
   if (error) console.error(error);
 }
+/* ─── CHECKINS ─── */
+export async function loadCheckin(date) {
+  const { data, error } = await supabase.from('checkins').select('*').eq('date', date).maybeSingle();
+  if (error) { console.error(error); return null; }
+  if (!data) return null;
+  return { hrv: String(data.hrv || ''), recovery: String(data.recovery || ''), feeling: data.feeling, readiness: data.readiness };
+}
+export async function saveCheckin(date, hrv, recovery, feeling, readiness) {
+  const { error } = await supabase.from('checkins').upsert({
+    id: `checkin-${date}`,
+    date,
+    hrv: hrv ? parseFloat(hrv) : null,
+    recovery: recovery ? parseFloat(recovery) : null,
+    feeling,
+    readiness,
+  }, { onConflict: 'id' });
+  if (error) console.error(error);
+}

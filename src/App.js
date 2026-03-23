@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities } from './strava';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin } from './db';
 import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace } from './PlanWizard';
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────
@@ -402,11 +402,9 @@ export default function App() {
   const [planGenLoading, setPlanGenLoading] = useState(false);
 
   // Check-in matin
-  const [checkIn, setCheckIn] = useState(()=>{
-    const saved = STORE.get("checkin_"+TODAY_STR, null);
-    return saved || { hrv: "", recovery: "", feeling: null }; // feeling: 0=frais, 1=correct, 2=fatigué
-  });
-  const [checkInSaved, setCheckInSaved] = useState(()=>!!STORE.get("checkin_"+TODAY_STR, null));
+  const [checkIn, setCheckIn] = useState({ hrv: "", recovery: "", feeling: null });
+  const [checkInSaved, setCheckInSaved] = useState(false);
+  const [checkInEditing, setCheckInEditing] = useState(false);
 
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
@@ -426,8 +424,10 @@ export default function App() {
   useEffect(()=>{
     async function init(){
       setLoading(true);
-      const [p,d]=await Promise.all([loadPlanned(),loadDone()]);
-      setPlanned(p); setDone(d); setLoading(false);
+      const [p,d,ci]=await Promise.all([loadPlanned(),loadDone(),loadCheckin(TODAY_STR)]);
+      setPlanned(p); setDone(d);
+      if(ci){ setCheckIn(ci); setCheckInSaved(true); }
+      setLoading(false);
     }
     init();
   },[]);
@@ -588,10 +588,12 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     return `VFC à ${h > 0 ? h+"ms — " : ""}fatigue détectée. Repos ou marche active aujourd'hui.`;
   }
 
-  function saveCheckIn(data) {
-    STORE.set("checkin_"+TODAY_STR, data);
-    setCheckIn(data);
+  async function saveCheckIn(data) {
+    const readiness = calcReadiness(data.hrv, data.recovery, data.feeling);
+    await saveCheckin(TODAY_STR, data.hrv, data.recovery, data.feeling, readiness);
+    setCheckIn({...data, readiness});
     setCheckInSaved(true);
+    setCheckInEditing(false);
   }
 
   async function askCoach(userMessage=null){
@@ -824,6 +826,24 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
           <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026</div>
         </div>
 
+        {/* BADGES HEADER */}
+        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+
+        {/* READINESS BADGE */}
+        {checkInSaved && (()=>{
+          const r = checkIn.readiness ?? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling);
+          const rc = r >= 85 ? "#4ECDC4" : r >= 65 ? "#6BF178" : r >= 45 ? "#FF9F43" : "#FF6B6B";
+          const rl = r >= 85 ? "EXCELLENT" : r >= 65 ? "BON" : r >= 45 ? "MODÉRÉ" : "FATIGUE";
+          return (
+            <div style={{background:"#0F1117",border:`1px solid ${rc}33`,borderRadius:14,padding:"12px 14px",textAlign:"center",minWidth:76,cursor:"pointer"}}
+              onClick={()=>setView("today")}>
+              <div style={{fontSize:8,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>READINESS</div>
+              <div style={{fontSize:22,fontWeight:800,color:rc,letterSpacing:-1,lineHeight:1}}>{r}</div>
+              <div style={{fontSize:8,color:rc,fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{rl}</div>
+            </div>
+          );
+        })()}
+
         {/* VMA BADGE — cliquable */}
         <div
           className="vma-badge"
@@ -854,6 +874,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
             ⚡ VOIR DÉTAIL
           </div>
         </div>
+        </div>{/* fin badges header */}
       </div>
 
       <div style={{padding:"12px 20px 0"}}>
@@ -899,77 +920,86 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
 
             {/* ── CHECK-IN MATIN ── */}
             {(()=>{
-              const readiness = (checkIn.hrv || checkIn.recovery || checkIn.feeling !== null)
-                ? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling) : null;
+              const readiness = checkInSaved && !checkInEditing
+                ? (checkIn.readiness ?? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling))
+                : (checkIn.hrv || checkIn.recovery || checkIn.feeling !== null)
+                  ? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling) : null;
               const reco = readiness !== null
                 ? getReadinessReco(readiness, checkIn.hrv, todayPlanned[0]?.type) : null;
-              const readinessColor = readiness === null ? "#555"
+              const rc = readiness === null ? "#555"
                 : readiness >= 85 ? "#4ECDC4"
                 : readiness >= 65 ? "#6BF178"
                 : readiness >= 45 ? "#FF9F43" : "#FF6B6B";
-              const readinessLabel = readiness === null ? "—"
+              const rl = readiness === null ? "—"
                 : readiness >= 85 ? "EXCELLENT"
                 : readiness >= 65 ? "BON"
                 : readiness >= 45 ? "MODÉRÉ" : "FATIGUE";
+              const feelEmoji = checkIn.feeling === 0 ? "🟢" : checkIn.feeling === 1 ? "🟡" : checkIn.feeling === 2 ? "🔴" : null;
+
+              // Mode réduit après sauvegarde
+              if (checkInSaved && !checkInEditing) return (
+                <div className="card" style={{padding:"16px 20px",marginBottom:14,background:"linear-gradient(135deg,#0F1117,#0d1a0f)",border:`1px solid ${rc}22`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:14}}>
+                      <div>
+                        <div style={{fontSize:36,fontWeight:800,color:rc,lineHeight:1}}>{readiness}</div>
+                        <div style={{fontSize:8,color:rc,fontFamily:"'JetBrains Mono',monospace",letterSpacing:1,marginTop:2}}>{rl}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,color:"#6BF178",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>🌅 READINESS</div>
+                        <div style={{display:"flex",gap:8,fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:"#888"}}>
+                          {checkIn.hrv && <span>VFC <span style={{color:"#E8E4DC"}}>{checkIn.hrv}ms</span></span>}
+                          {checkIn.recovery && <span>Récup <span style={{color:"#E8E4DC"}}>{checkIn.recovery}%</span></span>}
+                          {feelEmoji && <span>{feelEmoji}</span>}
+                        </div>
+                        {reco && <div style={{fontSize:11,color:"#666",fontFamily:"'JetBrains Mono',monospace",marginTop:4,maxWidth:220,lineHeight:1.5}}>{reco}</div>}
+                      </div>
+                    </div>
+                    <button onClick={()=>setCheckInEditing(true)} className="btn-ghost"
+                      style={{borderRadius:8,padding:"6px 10px",fontSize:10,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>
+                      ✎ MODIFIER
+                    </button>
+                  </div>
+                </div>
+              );
+
+              // Mode saisie
               return (
                 <div className="card" style={{padding:20,marginBottom:14,background:"linear-gradient(135deg,#0F1117,#0d1a0f)",border:"1px solid #6BF17822"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                     <div>
                       <div style={{fontSize:10,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>🌅 CHECK-IN MATIN</div>
-                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
-                        {checkInSaved ? "Aujourd'hui · mis à jour" : "Comment tu démarres ?"}
-                      </div>
+                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>Comment tu démarres ?</div>
                     </div>
                     {readiness !== null && (
                       <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:800,color:readinessColor,lineHeight:1}}>{readiness}</div>
-                        <div style={{fontSize:8,color:readinessColor,fontFamily:"'JetBrains Mono',monospace",letterSpacing:1}}>{readinessLabel}</div>
+                        <div style={{fontSize:28,fontWeight:800,color:rc,lineHeight:1}}>{readiness}</div>
+                        <div style={{fontSize:8,color:rc,fontFamily:"'JetBrains Mono',monospace",letterSpacing:1}}>{rl}</div>
                       </div>
                     )}
                   </div>
 
-                  {/* Inputs */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
                     <div>
                       <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>VFC BEVEL (ms)</div>
-                      <input
-                        type="number"
-                        className="inp"
-                        placeholder="ex: 82"
-                        value={checkIn.hrv}
+                      <input type="number" className="inp" placeholder="ex: 82" value={checkIn.hrv}
                         onChange={e=>setCheckIn(c=>({...c, hrv:e.target.value}))}
-                        style={{borderColor: checkIn.hrv ? "#6BF17844" : "#1C1F27"}}
-                      />
+                        style={{borderColor: checkIn.hrv ? "#6BF17844" : "#1C1F27"}}/>
                     </div>
                     <div>
                       <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>RÉCUP BEVEL (%)</div>
-                      <input
-                        type="number"
-                        className="inp"
-                        placeholder="ex: 78"
-                        value={checkIn.recovery}
+                      <input type="number" className="inp" placeholder="ex: 78" value={checkIn.recovery}
                         onChange={e=>setCheckIn(c=>({...c, recovery:e.target.value}))}
-                        style={{borderColor: checkIn.recovery ? "#6BF17844" : "#1C1F27"}}
-                      />
+                        style={{borderColor: checkIn.recovery ? "#6BF17844" : "#1C1F27"}}/>
                     </div>
                   </div>
 
-                  {/* Sensation */}
                   <div style={{marginBottom:14}}>
                     <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>SENSATION GÉNÉRALE</div>
                     <div style={{display:"flex",gap:8}}>
-                      {[
-                        {idx:0, emoji:"🟢", label:"FRAIS",   color:"#4ECDC4"},
-                        {idx:1, emoji:"🟡", label:"CORRECT", color:"#FFE66D"},
-                        {idx:2, emoji:"🔴", label:"FATIGUÉ", color:"#FF6B6B"},
-                      ].map(({idx, emoji, label, color})=>(
+                      {[{idx:0,emoji:"🟢",label:"FRAIS",color:"#4ECDC4"},{idx:1,emoji:"🟡",label:"CORRECT",color:"#FFE66D"},{idx:2,emoji:"🔴",label:"FATIGUÉ",color:"#FF6B6B"}].map(({idx,emoji,label,color})=>(
                         <button key={idx} onClick={()=>setCheckIn(c=>({...c, feeling:idx}))}
-                          style={{
-                            flex:1, border:`2px solid ${checkIn.feeling===idx?color:"#1C1F27"}`,
-                            background: checkIn.feeling===idx ? color+"22" : "transparent",
-                            borderRadius:10, padding:"10px 4px", cursor:"pointer",
-                            fontFamily:"'JetBrains Mono',monospace", textAlign:"center",
-                          }}>
+                          style={{flex:1,border:`2px solid ${checkIn.feeling===idx?color:"#1C1F27"}`,background:checkIn.feeling===idx?color+"22":"transparent",borderRadius:10,padding:"10px 4px",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",textAlign:"center"}}>
                           <div style={{fontSize:18,marginBottom:4}}>{emoji}</div>
                           <div style={{fontSize:9,color:checkIn.feeling===idx?color:"#555",letterSpacing:1}}>{label}</div>
                         </button>
@@ -977,28 +1007,24 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                     </div>
                   </div>
 
-                  {/* Recommandation */}
                   {reco && (
-                    <div style={{
-                      padding:"12px 14px",background:"#080A0E",borderRadius:10,
-                      border:`1px solid ${readinessColor}33`,marginBottom:12,
-                      fontSize:12,color:"#ccc",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,
-                    }}>
+                    <div style={{padding:"12px 14px",background:"#080A0E",borderRadius:10,border:`1px solid ${rc}33`,marginBottom:12,fontSize:12,color:"#ccc",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
                       {reco}
                     </div>
                   )}
 
-                  {/* Bouton sauvegarder */}
-                  <button
-                    onClick={()=>saveCheckIn({...checkIn})}
-                    style={{
-                      width:"100%", background: checkInSaved ? "#1C1F27" : "#6BF178",
-                      color: checkInSaved ? "#555" : "#080A0E",
-                      border:"none", borderRadius:10, padding:"10px", fontSize:12,
-                      fontWeight:700, cursor:"pointer", fontFamily:"'JetBrains Mono',monospace",
-                    }}>
-                    {checkInSaved ? "✓ SAUVEGARDÉ" : "SAUVEGARDER LE CHECK-IN"}
-                  </button>
+                  <div style={{display:"flex",gap:8}}>
+                    {checkInEditing && (
+                      <button onClick={()=>setCheckInEditing(false)} className="btn-ghost"
+                        style={{flex:1,borderRadius:10,padding:"10px",fontSize:12,fontFamily:"'JetBrains Mono',monospace"}}>
+                        ANNULER
+                      </button>
+                    )}
+                    <button onClick={()=>saveCheckIn({...checkIn})}
+                      style={{flex:2,background:"#6BF178",color:"#080A0E",border:"none",borderRadius:10,padding:"10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                      SAUVEGARDER ✓
+                    </button>
+                  </div>
                 </div>
               );
             })()}
