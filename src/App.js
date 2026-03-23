@@ -401,6 +401,13 @@ export default function App() {
   const [paceEdit, setPaceEdit] = useState(null); // key de l'allure en cours d'édition
   const [planGenLoading, setPlanGenLoading] = useState(false);
 
+  // Check-in matin
+  const [checkIn, setCheckIn] = useState(()=>{
+    const saved = STORE.get("checkin_"+TODAY_STR, null);
+    return saved || { hrv: "", recovery: "", feeling: null }; // feeling: 0=frais, 1=correct, 2=fatigué
+  });
+  const [checkInSaved, setCheckInSaved] = useState(()=>!!STORE.get("checkin_"+TODAY_STR, null));
+
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
@@ -545,6 +552,46 @@ PLAN À VENIR :
 ${planUpcoming.map(p=>`  ${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}
 
 Réponds en français, de façon directe et personnalisée comme un vrai coach. Sois précis sur les allures (utilise les min/km). Maximum 3-4 paragraphes courts sauf si l'athlète pose une question précise.`;
+  }
+
+  function calcReadiness(hrv, recovery, feeling) {
+    // Score /100 basé sur VFC + récup + sensation
+    const h = parseFloat(hrv) || 0;
+    const r = parseFloat(recovery) || 0;
+    const f = feeling; // 0=frais, 1=correct, 2=fatigué
+
+    // VFC : <60=mauvais, 60-75=moyen, 75-85=bien, >85=excellent
+    const hrvScore = h <= 0 ? 50 : h >= 85 ? 100 : h >= 75 ? 80 + (h-75)/10*20 : h >= 60 ? 50 + (h-60)/15*30 : Math.max(0, h/60*50);
+    // Récup Bevel : linéaire 0→100
+    const recScore = r <= 0 ? 50 : Math.min(r, 100);
+    // Sensation : frais=100, correct=65, fatigué=30
+    const feelScore = f === null ? 65 : f === 0 ? 100 : f === 1 ? 65 : 30;
+
+    const score = Math.round(hrvScore * 0.45 + recScore * 0.35 + feelScore * 0.20);
+    return Math.min(100, Math.max(0, score));
+  }
+
+  function getReadinessReco(score, hrv, plannedType) {
+    const h = parseFloat(hrv) || 0;
+    const sessionLabel = plannedType || "ta séance";
+    if (score >= 85) {
+      if (h >= 78) return `VFC à ${h}ms — tu es frais et ton système nerveux est prêt. ${sessionLabel} validée 💪`;
+      return `Score excellent — tout vert pour ${sessionLabel} aujourd'hui 💪`;
+    }
+    if (score >= 65) {
+      if (h >= 70 && h < 78) return `VFC à ${h}ms — bonne forme. EF ou séance modérée, évite l'intensité maximale.`;
+      return `Forme correcte — ${sessionLabel} possible, reste à l'écoute de ton corps.`;
+    }
+    if (score >= 45) {
+      return `VFC à ${h > 0 ? h+"ms — " : ""}ton corps récupère encore. EF légère ou repos recommandé.`;
+    }
+    return `VFC à ${h > 0 ? h+"ms — " : ""}fatigue détectée. Repos ou marche active aujourd'hui.`;
+  }
+
+  function saveCheckIn(data) {
+    STORE.set("checkin_"+TODAY_STR, data);
+    setCheckIn(data);
+    setCheckInSaved(true);
   }
 
   async function askCoach(userMessage=null){
@@ -849,6 +896,113 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* ═══ TODAY ═══ */}
         {view==="today" && (
           <div className="fade-up">
+
+            {/* ── CHECK-IN MATIN ── */}
+            {(()=>{
+              const readiness = (checkIn.hrv || checkIn.recovery || checkIn.feeling !== null)
+                ? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling) : null;
+              const reco = readiness !== null
+                ? getReadinessReco(readiness, checkIn.hrv, todayPlanned[0]?.type) : null;
+              const readinessColor = readiness === null ? "#555"
+                : readiness >= 85 ? "#4ECDC4"
+                : readiness >= 65 ? "#6BF178"
+                : readiness >= 45 ? "#FF9F43" : "#FF6B6B";
+              const readinessLabel = readiness === null ? "—"
+                : readiness >= 85 ? "EXCELLENT"
+                : readiness >= 65 ? "BON"
+                : readiness >= 45 ? "MODÉRÉ" : "FATIGUE";
+              return (
+                <div className="card" style={{padding:20,marginBottom:14,background:"linear-gradient(135deg,#0F1117,#0d1a0f)",border:"1px solid #6BF17822"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <div>
+                      <div style={{fontSize:10,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>🌅 CHECK-IN MATIN</div>
+                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+                        {checkInSaved ? "Aujourd'hui · mis à jour" : "Comment tu démarres ?"}
+                      </div>
+                    </div>
+                    {readiness !== null && (
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:800,color:readinessColor,lineHeight:1}}>{readiness}</div>
+                        <div style={{fontSize:8,color:readinessColor,fontFamily:"'JetBrains Mono',monospace",letterSpacing:1}}>{readinessLabel}</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Inputs */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>VFC BEVEL (ms)</div>
+                      <input
+                        type="number"
+                        className="inp"
+                        placeholder="ex: 82"
+                        value={checkIn.hrv}
+                        onChange={e=>setCheckIn(c=>({...c, hrv:e.target.value}))}
+                        style={{borderColor: checkIn.hrv ? "#6BF17844" : "#1C1F27"}}
+                      />
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>RÉCUP BEVEL (%)</div>
+                      <input
+                        type="number"
+                        className="inp"
+                        placeholder="ex: 78"
+                        value={checkIn.recovery}
+                        onChange={e=>setCheckIn(c=>({...c, recovery:e.target.value}))}
+                        style={{borderColor: checkIn.recovery ? "#6BF17844" : "#1C1F27"}}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sensation */}
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>SENSATION GÉNÉRALE</div>
+                    <div style={{display:"flex",gap:8}}>
+                      {[
+                        {idx:0, emoji:"🟢", label:"FRAIS",   color:"#4ECDC4"},
+                        {idx:1, emoji:"🟡", label:"CORRECT", color:"#FFE66D"},
+                        {idx:2, emoji:"🔴", label:"FATIGUÉ", color:"#FF6B6B"},
+                      ].map(({idx, emoji, label, color})=>(
+                        <button key={idx} onClick={()=>setCheckIn(c=>({...c, feeling:idx}))}
+                          style={{
+                            flex:1, border:`2px solid ${checkIn.feeling===idx?color:"#1C1F27"}`,
+                            background: checkIn.feeling===idx ? color+"22" : "transparent",
+                            borderRadius:10, padding:"10px 4px", cursor:"pointer",
+                            fontFamily:"'JetBrains Mono',monospace", textAlign:"center",
+                          }}>
+                          <div style={{fontSize:18,marginBottom:4}}>{emoji}</div>
+                          <div style={{fontSize:9,color:checkIn.feeling===idx?color:"#555",letterSpacing:1}}>{label}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Recommandation */}
+                  {reco && (
+                    <div style={{
+                      padding:"12px 14px",background:"#080A0E",borderRadius:10,
+                      border:`1px solid ${readinessColor}33`,marginBottom:12,
+                      fontSize:12,color:"#ccc",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,
+                    }}>
+                      {reco}
+                    </div>
+                  )}
+
+                  {/* Bouton sauvegarder */}
+                  <button
+                    onClick={()=>saveCheckIn({...checkIn})}
+                    style={{
+                      width:"100%", background: checkInSaved ? "#1C1F27" : "#6BF178",
+                      color: checkInSaved ? "#555" : "#080A0E",
+                      border:"none", borderRadius:10, padding:"10px", fontSize:12,
+                      fontWeight:700, cursor:"pointer", fontFamily:"'JetBrains Mono',monospace",
+                    }}>
+                    {checkInSaved ? "✓ SAUVEGARDÉ" : "SAUVEGARDER LE CHECK-IN"}
+                  </button>
+                </div>
+              );
+            })()}
+
             {todayPlanned.length===0&&(
               <div className="card" style={{padding:28,textAlign:"center"}}>
                 <div style={{fontSize:40,marginBottom:12}}>🏃</div>
