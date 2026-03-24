@@ -406,6 +406,9 @@ export default function App() {
   const [checkInSaved, setCheckInSaved] = useState(false);
   const [checkInEditing, setCheckInEditing] = useState(false);
 
+  // Readiness advisor
+  const [readinessAction, setReadinessAction] = useState(null); // {type:'swap'|'postpone'|'reduce', sessionA, sessionB, done}
+
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
@@ -616,6 +619,143 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     setCheckIn({...data, readiness});
     setCheckInSaved(true);
     setCheckInEditing(false);
+  }
+
+  // ── READINESS ADVISOR ────────────────────────────────────────────────
+
+  // Séances intensives qui nécessitent un bon readiness
+  const INTENSE_TYPES = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
+  const EASY_TYPES    = ["Endurance fondamentale", "Footing"];
+
+  // Calcule la suggestion d'adaptation selon readiness + séance du jour
+  function getReadinessAdvice(readiness, todaySession, weekPlanned, doneSessions) {
+    if (!readiness || !todaySession) return null;
+    if (doneSessions.find(d => d.plannedId === todaySession.id)) return null; // déjà fait
+
+    const isIntense = INTENSE_TYPES.includes(todaySession.type);
+    const isSL      = todaySession.type === "Sortie longue";
+
+    // Séances futures de la semaine non encore faites
+    const futureWeek = weekPlanned
+      .filter(p => p.date > TODAY_STR && !doneSessions.find(d => d.plannedId === p.id))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Score ≥ 65 et séance EF/Footing → tout va bien
+    if (readiness >= 65 && !isIntense && !isSL) return null;
+    // Score ≥ 85 → tout va bien
+    if (readiness >= 85) return null;
+
+    // SCORE < 45 → repos total
+    if (readiness < 45) {
+      return {
+        level: "danger",
+        color: "#FF6B6B",
+        icon: "🔴",
+        title: "Repos recommandé",
+        message: `Readiness à ${readiness}/100 — ton corps est en déficit de récupération. Reporter la séance est la meilleure décision aujourd'hui.`,
+        actions: [
+          { id: "postpone", label: "REPORTER À DEMAIN", icon: "→" },
+          { id: "ignore",   label: "IGNORER",           icon: "✕", ghost: true },
+        ],
+        swapTarget: null,
+      };
+    }
+
+    // SCORE 45–64 avec séance intense → proposer échange avec EF de la semaine
+    if (readiness < 65 && isIntense) {
+      const swapTarget = futureWeek.find(p => EASY_TYPES.includes(p.type));
+      const reduceTarget = { ...todaySession, targetDist: Math.round(todaySession.targetDist * 0.75 * 10) / 10, targetDur: Math.round(todaySession.targetDur * 0.75), notes: "Volume réduit de 25% — readiness bas" };
+      const actions = [];
+      if (swapTarget) {
+        actions.push({ id: "swap", label: `ÉCHANGER AVEC EF DU ${fmtDate(swapTarget.date, {weekday:"short", day:"numeric"})}`, icon: "⇄", swapWith: swapTarget });
+      }
+      actions.push({ id: "reduce", label: "RÉDUIRE LE VOLUME (-25%)", icon: "↓", reduced: reduceTarget });
+      actions.push({ id: "ignore", label: "IGNORER", icon: "✕", ghost: true });
+      return {
+        level: "warning",
+        color: "#FF9F43",
+        icon: "🟡",
+        title: `${todaySession.type} risquée`,
+        message: `Readiness à ${readiness}/100 — une séance intense aujourd'hui risque d'aggraver la fatigue et d'augmenter le risque de blessure.${swapTarget ? ` Tu peux échanger avec ton EF du ${fmtDate(swapTarget.date, {weekday:"long", day:"numeric"})}.` : ""}`,
+        actions,
+        swapTarget,
+      };
+    }
+
+    // SCORE 45–64 avec SL → réduire la distance
+    if (readiness < 65 && isSL) {
+      const reduced = { ...todaySession, targetDist: Math.round(todaySession.targetDist * 0.75 * 10) / 10, targetDur: Math.round(todaySession.targetDur * 0.75), notes: "SL réduite de 25% — readiness bas" };
+      return {
+        level: "warning",
+        color: "#FF9F43",
+        icon: "🟡",
+        title: "Sortie longue à adapter",
+        message: `Readiness à ${readiness}/100 — une SL complète aujourd'hui est risquée. Réduis à ${reduced.targetDist}km et reste en zone 2 stricte.`,
+        actions: [
+          { id: "reduce", label: `RÉDUIRE À ${reduced.targetDist}KM`, icon: "↓", reduced },
+          { id: "postpone", label: "REPORTER", icon: "→" },
+          { id: "ignore", label: "IGNORER", icon: "✕", ghost: true },
+        ],
+        swapTarget: null,
+      };
+    }
+
+    // SCORE 65–84 avec séance intense → avertissement doux
+    if (readiness < 85 && isIntense) {
+      return {
+        level: "caution",
+        color: "#FFE66D",
+        icon: "⚠️",
+        title: "Séance validée avec vigilance",
+        message: `Readiness à ${readiness}/100 — séance faisable mais surveille tes sensations. Si tu te sens mal à l'échauffement, n'hésite pas à transformer en EF.`,
+        actions: [
+          { id: "ignore", label: "COMPRIS, ON Y VA", icon: "💪", primary: true },
+          { id: "reduce", label: "RÉDUIRE LE VOLUME (-20%)", icon: "↓", reduced: { ...todaySession, targetDist: Math.round(todaySession.targetDist * 0.80 * 10) / 10, targetDur: Math.round(todaySession.targetDur * 0.80) } },
+        ],
+        swapTarget: null,
+      };
+    }
+
+    return null;
+  }
+
+  // Exécute l'action choisie
+  async function applyReadinessAction(action, todaySession) {
+    if (action.id === "ignore") {
+      setReadinessAction(prev => ({ ...prev, done: true }));
+      return;
+    }
+
+    if (action.id === "swap" && action.swapWith) {
+      // Échanger les dates des deux séances
+      const sessionA = { ...todaySession,    date: action.swapWith.date };
+      const sessionB = { ...action.swapWith, date: todaySession.date };
+      await savePlanned(sessionA);
+      await savePlanned(sessionB);
+      setPlanned(prev => prev.map(p => {
+        if (p.id === sessionA.id) return sessionA;
+        if (p.id === sessionB.id) return sessionB;
+        return p;
+      }));
+      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Séances échangées — ${sessionB.type} déplacé au ${fmtDate(sessionB.date, {weekday:"long", day:"numeric"})}` }));
+    }
+
+    if (action.id === "postpone") {
+      // Déplacer la séance au lendemain
+      const tomorrow = addDays(TODAY_STR, 1);
+      const updated = { ...todaySession, date: tomorrow };
+      await savePlanned(updated);
+      setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
+      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Séance reportée au ${fmtDate(tomorrow, {weekday:"long", day:"numeric"})}` }));
+    }
+
+    if (action.id === "reduce" && action.reduced) {
+      // Réduire le volume de la séance du jour
+      const updated = { ...action.reduced };
+      await savePlanned(updated);
+      setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
+      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Volume réduit — ${updated.targetDist}km · ${updated.targetDur}min` }));
+    }
   }
 
   async function askCoach(userMessage=null){
@@ -1024,6 +1164,81 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                       style={{flex:2,background:"#6BF178",color:"#080A0E",border:"none",borderRadius:10,padding:"10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
                       SAUVEGARDER ✓
                     </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── READINESS ADVISOR ── */}
+            {(()=>{
+              if (!checkInSaved) return null;
+              const readiness = checkIn.readiness ?? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling);
+              const curWk = wkKey(TODAY_STR);
+              const weekPlanned = planned.filter(p => wkKey(p.date) === curWk);
+              const todayUnlinked = todayPlanned.filter(p => !done.find(d => d.plannedId === p.id));
+              if (todayUnlinked.length === 0) return null;
+
+              const todaySession = todayUnlinked[0];
+              const advice = readinessAction?.done
+                ? null
+                : getReadinessAdvice(readiness, todaySession, weekPlanned, done);
+
+              if (!advice && !readinessAction?.done) return null;
+
+              // Résultat après action
+              if (readinessAction?.done) return (
+                <div className="card" style={{padding:"14px 18px",marginBottom:14,border:"1px solid #4ECDC433",background:"#0d2b20"}}>
+                  <div style={{fontSize:12,color:"#4ECDC4",fontFamily:"'JetBrains Mono',monospace"}}>{readinessAction.result || "✓ Action appliquée"}</div>
+                </div>
+              );
+
+              return (
+                <div className="card" style={{padding:20,marginBottom:14,border:`2px solid ${advice.color}44`,background:`${advice.color}08`}}>
+                  {/* Header */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                    <div style={{fontSize:24,flexShrink:0}}>{advice.icon}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:800,color:advice.color}}>{advice.title}</div>
+                      <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:1}}>ADAPTATION SUGGÉRÉE</div>
+                    </div>
+                    <div style={{
+                      width:36,height:36,borderRadius:10,
+                      background: advice.level==="danger"?"#FF6B6B22":advice.level==="warning"?"#FF9F4322":"#FFE66D22",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:14,fontWeight:800,color:advice.color,fontFamily:"'JetBrains Mono',monospace",
+                    }}>{readiness}</div>
+                  </div>
+
+                  {/* Message */}
+                  <div style={{
+                    padding:"12px 14px",background:"#080A0E",borderRadius:10,
+                    marginBottom:14,fontSize:12,color:"#ccc",
+                    fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,
+                    borderLeft:`3px solid ${advice.color}`,
+                  }}>
+                    {advice.message}
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {advice.actions.map((action, i) => (
+                      <button key={action.id+i}
+                        onClick={()=>{ setReadinessAction({advice, action}); applyReadinessAction(action, todaySession); }}
+                        style={{
+                          width:"100%",
+                          background: action.primary ? advice.color : action.ghost ? "transparent" : advice.color+"22",
+                          color: action.primary ? "#080A0E" : action.ghost ? "#555" : advice.color,
+                          border: action.ghost ? "1px solid #1C1F27" : `1px solid ${advice.color}44`,
+                          borderRadius:10,padding:"12px 14px",
+                          fontSize:11,fontWeight:action.ghost?400:700,
+                          cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",
+                          display:"flex",alignItems:"center",justifyContent:"center",gap:8,
+                          letterSpacing:action.ghost?0:0.5,
+                        }}>
+                        <span style={{fontSize:14}}>{action.icon}</span>
+                        {action.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               );
