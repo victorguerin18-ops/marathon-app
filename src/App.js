@@ -440,15 +440,30 @@ export default function App() {
       setStravaConnected(true);
       setSyncStatus("Import des séances...");
       fetchActivities().then(async activities=>{
-        const ids=new Set(done.map(r=>r.id));
-        const news=activities.filter(a=>!ids.has(a.id));
-        if(news.length>0){await saveManyDone(news); setDone(prev=>[...prev,...news]);}
-        setSyncStatus(`✓ ${news.length} séances importées !`);
+        const existingMap=new Map(done.map(r=>[r.id,r]));
+        const toSave=activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id)));
+        const newCount=toSave.filter(a=>!existingMap.has(a.id)).length;
+        if(toSave.length>0){await saveManyDone(toSave); setDone(prev=>{const m=new Map(prev.map(r=>[r.id,r])); toSave.forEach(a=>m.set(a.id,a)); return Array.from(m.values());});}
+        setSyncStatus(`✓ ${newCount} nouvelles · ${toSave.length-newCount} mises à jour`);
         setTimeout(()=>setSyncStatus(""),4000); setStravaLoading(false);
       });
       window.history.replaceState({},'','/');
     }).catch(()=>{setStravaLoading(false);setSyncStatus("");});
   },[done]);
+
+  // Merge Strava activity avec données locales existantes
+  // On garde rpe, type, feeling, notes si déjà modifiés manuellement
+  function mergeStravaActivity(incoming, existing) {
+    if (!existing) return incoming; // nouvelle séance → tout depuis Strava
+    return {
+      ...incoming,                          // dist, dur, hr, date depuis Strava
+      type:    existing.type,               // type modifié manuellement conservé
+      rpe:     existing.rpe,               // RPE manuel conservé
+      feeling: existing.feeling,           // ressenti conservé
+      notes:   existing.notes || incoming.notes, // notes conservées (sinon nom Strava)
+      plannedId: existing.plannedId,       // lien séance planifiée conservé
+    };
+  }
 
   async function syncStrava(){
     setStravaLoading(true); setSyncStatus("Synchronisation...");
@@ -460,10 +475,11 @@ export default function App() {
       setStravaLoading(false); return;
     }
     const activities=await fetchActivities();
-    const ids=new Set(done.map(r=>r.id));
-    const news=activities.filter(a=>!ids.has(a.id));
-    if(news.length>0){await saveManyDone(news); setDone(prev=>[...prev,...news]);}
-    setSyncStatus(`✓ ${news.length} nouvelles séances`);
+    const existingMap=new Map(done.map(r=>[r.id,r]));
+    const toSave=activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id)));
+    const newCount=toSave.filter(a=>!existingMap.has(a.id)).length;
+    if(toSave.length>0){await saveManyDone(toSave); setDone(prev=>{const m=new Map(prev.map(r=>[r.id,r])); toSave.forEach(a=>m.set(a.id,a)); return Array.from(m.values());});}
+    setSyncStatus(`✓ ${newCount} nouvelles · ${toSave.length-newCount} mises à jour`);
     setTimeout(()=>setSyncStatus(""),3000); setStravaLoading(false);
   }
 
