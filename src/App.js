@@ -113,6 +113,69 @@ function computeVMA(doneList) {
   return { breakdown: results, finalVMA };
 }
 
+// ─── PROTECTION SCORE ────────────────────────────────────────────────
+// Score composite /100 — plus c'est haut, plus tu es protégé
+function computeProtectionScore({ done, readiness, weeklyVol }) {
+  const signals = [];
+
+  // ── ACWR 4 semaines glissantes (35%) ──────────────────────────────
+  // Charge = dist × RPE moyen, aiguë = 7j, chronique = moyenne 4×7j
+  const acuteLoad = done
+    .filter(r => r.date >= addDays(TODAY_STR, -7))
+    .reduce((s, r) => s + r.dist * (r.rpe || 5), 0);
+  const weeks4 = [0,1,2,3].map(i =>
+    done.filter(r => r.date >= addDays(TODAY_STR, -(i+1)*7) && r.date < addDays(TODAY_STR, -i*7))
+        .reduce((s, r) => s + r.dist * (r.rpe || 5), 0)
+  );
+  const chronicLoad = weeks4.reduce((s, v) => s + v, 0) / 4;
+  const acwr = chronicLoad > 0 ? acuteLoad / chronicLoad : 1;
+  // Zone optimale 0.8–1.3 → score 100, <0.8 ou >1.5 → score 0
+  let acwrScore = 100;
+  if (acwr < 0.8)       acwrScore = Math.round((acwr / 0.8) * 80);
+  else if (acwr <= 1.3) acwrScore = 100;
+  else if (acwr <= 1.5) acwrScore = Math.round(100 - ((acwr - 1.3) / 0.2) * 60);
+  else                  acwrScore = Math.max(0, Math.round(40 - (acwr - 1.5) * 80));
+  signals.push({ key: "ACWR", label: "Charge aiguë/chronique", score: acwrScore, weight: 0.35, value: acwr.toFixed(2), optimal: "0.8–1.3" });
+
+  // ── Progression volume semaine/semaine (10%) ──────────────────────
+  const curKm  = weeklyVol[0]?.dist || 0;
+  const prevKm = weeklyVol[1]?.dist || 0;
+  const volPct  = prevKm > 0 ? ((curKm - prevKm) / prevKm * 100) : 0;
+  // Règle des 10% : +10% max optimal, >20% risqué
+  let volScore = 100;
+  if (volPct > 20)      volScore = Math.max(0, Math.round(100 - (volPct - 20) * 3));
+  else if (volPct > 10) volScore = Math.round(100 - (volPct - 10) * 2);
+  signals.push({ key: "VOL", label: "Progression volume", score: volScore, weight: 0.10, value: `${volPct > 0 ? "+" : ""}${Math.round(volPct)}%`, optimal: "≤+10%/sem" });
+
+  // ── Monotonie entraînement (10%) ─────────────────────────────────
+  // Monotonie = charge_moy_7j / écart-type_charge_7j
+  // Si tout au même RPE → monotonie élevée → risque
+  const last7 = done.filter(r => r.date >= addDays(TODAY_STR, -7));
+  let monoScore = 100;
+  if (last7.length >= 3) {
+    const loads = last7.map(r => r.dist * (r.rpe || 5));
+    const mean  = loads.reduce((s, v) => s + v, 0) / loads.length;
+    const std   = Math.sqrt(loads.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / loads.length);
+    const mono  = std > 0 ? mean / std : 1;
+    // Monotonie <2 = bien, 2-3 = moyen, >3 = risqué
+    monoScore = mono <= 2 ? 100 : mono <= 3 ? Math.round(100 - (mono - 2) * 40) : Math.max(0, Math.round(60 - (mono - 3) * 40));
+  }
+  signals.push({ key: "MONO", label: "Monotonie", score: monoScore, weight: 0.10, value: monoScore >= 80 ? "variée" : monoScore >= 60 ? "modérée" : "élevée", optimal: "variée" });
+
+  // ── Readiness VFC + récup (45%) ───────────────────────────────────
+  const readinessScore = readiness ?? 65; // 65 par défaut si pas de check-in
+  signals.push({ key: "READY", label: "Readiness (VFC + récup)", score: readinessScore, weight: 0.45, value: readiness ? `${readiness}/100` : "—", optimal: "≥75" });
+
+  // ── Score final ───────────────────────────────────────────────────
+  const total = Math.round(signals.reduce((s, sig) => s + sig.score * sig.weight, 0));
+
+  const level = total >= 75 ? { label: "BIEN PROTÉGÉ",  color: "#4ECDC4", bg: "#0d2b28", icon: "🛡️" }
+              : total >= 50 ? { label: "VIGILANCE",      color: "#FF9F43", bg: "#2b1a00", icon: "⚠️" }
+              :               { label: "RISQUE ÉLEVÉ",   color: "#FF6B6B", bg: "#2b0d0d", icon: "🚨" };
+
+  return { total, signals, level, acwr };
+}
+
 function fmtPaceStr(secPerKm) {
   if (!secPerKm || secPerKm <= 0) return "--'--\"";
   const m = Math.floor(secPerKm / 60);
@@ -923,6 +986,13 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
 
   // VMA calculée pour le badge header
   const computedVMA = useMemo(() => computeVMA(done), [done]);
+
+  const protectionScore = useMemo(() => {
+    const readiness = checkInSaved
+      ? (checkIn.readiness ?? (checkIn.hrv || checkIn.recovery ? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling) : null))
+      : null;
+    return computeProtectionScore({ done, readiness, weeklyVol });
+  }, [done, checkIn, checkInSaved, weeklyVol]);
   const displayVMA = computedVMA?.finalVMA ?? planConfig.vma;
   const vmaDiff = computedVMA ? Math.abs(displayVMA - planConfig.vma) : 0;
   const vmaChanged = vmaDiff >= 0.2;
@@ -1301,7 +1371,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
             </div>
 
             {upcoming.slice(0,3).length>0&&(
-              <div style={{marginTop:8}}>
+              <div style={{marginTop:14}}>
                 <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>PROCHAINES SÉANCES</div>
                 {upcoming.slice(0,3).map(p=>{
                   const tm=TYPE_META[p.type]||TYPE_META["Footing"];
@@ -1319,19 +1389,51 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
               </div>
             )}
 
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:16}}>
-              <div className="card" style={{padding:16}}>
-                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>CETTE SEMAINE</div>
-                <div style={{fontSize:28,fontWeight:800}}>{curWeek.dist.toFixed(1)}<span style={{fontSize:13,color:"#555",fontWeight:400}}>km</span></div>
-                <div style={{fontSize:11,color:curWeek.dist>prevWeek.dist?"#4ECDC4":"#FF6B6B",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
-                  {curWeek.dist>prevWeek.dist?"▲":"▼"} {Math.abs(curWeek.dist-prevWeek.dist).toFixed(1)} vs S-1
+            {/* ── PROTECTION SCORE ── */}
+            <div className="card" style={{padding:20,marginTop:14,border:`1px solid ${protectionScore.level.color}33`,background:`${protectionScore.level.bg}`}}>
+              {/* Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:10,color:protectionScore.level.color,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>
+                    {protectionScore.level.icon} PROTECTION BLESSURE
+                  </div>
+                  <div style={{fontSize:22,fontWeight:800,color:protectionScore.level.color}}>{protectionScore.level.label}</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:44,fontWeight:800,color:protectionScore.level.color,lineHeight:1,letterSpacing:-2}}>{protectionScore.total}</div>
+                  <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>/100</div>
                 </div>
               </div>
-              <div className="card" style={{padding:16,borderColor:acwr>1.3?"#FF6B6B33":acwr>1.15?"#FF9F4333":"#1C1F27"}}>
-                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>RISQUE BLESSURE</div>
-                <div style={{fontSize:16,fontWeight:800,color:acwrStatus.color}}>{acwrStatus.label}</div>
-                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>ACWR {acwr.toFixed(2)}</div>
+
+              {/* Barre globale */}
+              <div style={{height:6,background:"#1C1F27",borderRadius:3,marginBottom:16,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${protectionScore.total}%`,background:`linear-gradient(90deg,${protectionScore.level.color}88,${protectionScore.level.color})`,borderRadius:3,transition:"width 1s ease"}}/>
               </div>
+
+              {/* Signaux détaillés */}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {protectionScore.signals.map(sig => (
+                  <div key={sig.key}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{fontSize:10,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{sig.label}</span>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{sig.value}</span>
+                        <span style={{fontSize:10,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:sig.score>=75?"#4ECDC4":sig.score>=50?"#FF9F43":"#FF6B6B",minWidth:28,textAlign:"right"}}>{sig.score}</span>
+                      </div>
+                    </div>
+                    <div style={{height:3,background:"#1C1F27",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${sig.score}%`,background:sig.score>=75?"#4ECDC4":sig.score>=50?"#FF9F43":"#FF6B6B",borderRadius:2,transition:"width 0.8s ease"}}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Message si check-in pas fait */}
+              {!checkInSaved && (
+                <div style={{marginTop:12,padding:"10px 12px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
+                  💡 Fais ton check-in matin pour affiner le score avec ta VFC et récupération
+                </div>
+              )}
             </div>
           </div>
         )}
