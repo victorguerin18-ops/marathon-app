@@ -959,9 +959,6 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     .pulse{animation:pulse 1.5s ease-in-out infinite}
     .vma-badge{transition:all .2s;cursor:pointer}
     .vma-badge:hover{opacity:.8;transform:scale(.97)}
-    @keyframes vmaPing{0%{transform:scale(1);opacity:1}70%{transform:scale(1.8);opacity:0}100%{transform:scale(1.8);opacity:0}}
-    .vma-ping{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#00D2FF;animation:vmaPing 2s ease-out infinite}
-    .vma-dot{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#00D2FF}
   `;
 
   if(loading) return (
@@ -973,7 +970,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
   );
 
   return (
-    <div style={{minHeight:"100vh",background:"#080A0E",fontFamily:"'Syne',sans-serif",color:"#E8E4DC",maxWidth:480,margin:"0 auto",paddingBottom:`calc(72px + env(safe-area-inset-bottom, 16px))`}}>
+    <div style={{minHeight:"100vh",background:"#080A0E",fontFamily:"'Syne',sans-serif",color:"#E8E4DC",maxWidth:480,margin:"0 auto",paddingBottom:`calc(84px + env(safe-area-inset-bottom, 16px))`}}>
       <style>{css}</style>
 
       {/* TOP */}
@@ -1009,7 +1006,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* VMA BADGE — cliquable */}
         <div className="vma-badge" onClick={() => setShowVMA(true)}
           style={{position:"relative",background:vmaChanged?"linear-gradient(135deg,#001a24,#00D2FF18)":"#0F1117",border:`1px solid ${vmaChanged?"#00D2FF55":"#1C1F27"}`,borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,flexShrink:0}}>
-          {vmaChanged && (<><div className="vma-ping"/><div className="vma-dot"/></>)}
+
           <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA</div>
           <div style={{fontSize:20,fontWeight:800,color:vmaChanged?"#00D2FF":"#E8E4DC",letterSpacing:-1,lineHeight:1}}>{displayVMA.toFixed(1)}</div>
           <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>km/h</div>
@@ -1023,34 +1020,9 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         </div>
       </div>
 
-      <div style={{padding:"12px 20px 0"}}>
-        {!stravaConnected?(
-          <button onClick={stravaLogin} style={{width:"100%",background:"#FC4C02",border:"none",borderRadius:10,padding:"12px",color:"#fff",fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",cursor:"pointer"}}>
-            🔗 CONNECTER STRAVA
-          </button>
-        ):(
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0F1117",border:"1px solid #1C1F27",borderRadius:10,padding:"10px 14px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:"#FC4C02"}}/>
-              <span style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{syncStatus||`STRAVA · ${done.filter(d=>d.fromStrava).length} séances`}</span>
-            </div>
-            <button onClick={syncStrava} className="btn-ghost" style={{borderRadius:8,padding:"4px 10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>
-              {stravaLoading?<span className="spin">↻</span>:"↻ SYNC"}
-            </button>
-          </div>
-        )}
-      </div>
 
-      {/* NAV */}
-      <div style={{display:"flex",gap:3,padding:"16px 20px 0"}}>
-        {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["coach","✦","COACH"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl])=>(
-          <button key={v} className="nav-tab" onClick={()=>setView(v)}
-            style={{flex:1,background:view===v?"#1C1F27":"transparent",color:view===v?"#E8E4DC":"#555",borderRadius:8,padding:"8px 0",fontSize:9,letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",display:"flex",flexDirection:"column",alignItems:"center",gap:2,border:"none"}}>
-            <span style={{fontSize:14}}>{ico}</span>
-            <span>{lbl}</span>
-          </button>
-        ))}
-      </div>
+
+
 
       <div style={{padding:"20px 20px 0"}}>
 
@@ -1754,6 +1726,22 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         {/* ═══ JOURNAL ═══ */}
         {view==="journal" && (
           <div className="fade-up">
+            {/* Strava sync dans le journal */}
+            {!stravaConnected?(
+              <button onClick={stravaLogin} style={{width:"100%",background:"#FC4C02",border:"none",borderRadius:10,padding:"12px",color:"#fff",fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",cursor:"pointer",marginBottom:14}}>
+                🔗 CONNECTER STRAVA
+              </button>
+            ):(
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0F1117",border:"1px solid #1C1F27",borderRadius:10,padding:"10px 14px",marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:"#FC4C02"}}/>
+                  <span style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{syncStatus||`STRAVA · ${done.filter(d=>d.fromStrava).length} séances`}</span>
+                </div>
+                <button onClick={syncStrava} className="btn-ghost" style={{borderRadius:8,padding:"4px 10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>
+                  {stravaLoading?<span className="spin">↻</span>:"↻ SYNC"}
+                </button>
+              </div>
+            )}
             <div style={{fontSize:11,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:14}}>
               {done.length} SÉANCES · {totalKm.toFixed(0)} KM TOTAL
               {done.filter(d=>d.fromStrava).length>0&&<span style={{color:"#FC4C02",marginLeft:8}}>· {done.filter(d=>d.fromStrava).length} STRAVA</span>}
@@ -1799,13 +1787,19 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
       </div>
 
       {/* BOTTOM NAV */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:480,maxWidth:"100vw",background:"#0F1117",borderTop:"1px solid #1C1F27",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom, 12px)"}}>
-        {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["coach","✦","COACH"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl])=>(
-          <button key={v} className="nav-tab" onClick={()=>setView(v)} style={{flex:1,padding:"10px 0 6px",color:view===v?v==="coach"?"#6BF178":"#E8E4DC":"#444",background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,border:"none"}}>
-            <span style={{fontSize:16}}>{ico}</span>
-            <span style={{fontSize:8,letterSpacing:1,fontFamily:"'JetBrains Mono',monospace"}}>{lbl}</span>
-          </button>
-        ))}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:480,maxWidth:"100vw",background:"#0F1117",borderTop:"1px solid #1C1F27",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom, 16px)"}}>
+        {[["today","⊙","AUJOURD'HUI"],["plan","◫","PLAN"],["coach","✦","COACH"],["analyse","◈","ANALYSE"],["journal","≡","JOURNAL"]].map(([v,ico,lbl])=>{
+          const active = view===v;
+          const accent = v==="coach"?"#6BF178":v==="today"?"#00D2FF":v==="plan"?"#FFE66D":v==="analyse"?"#C77DFF":"#FC4C02";
+          return (
+            <button key={v} className="nav-tab" onClick={()=>setView(v)}
+              style={{flex:1,padding:"12px 0 8px",color:active?accent:"#444",background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:4,border:"none",position:"relative"}}>
+              {active && <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:28,height:2,background:accent,borderRadius:"0 0 2px 2px"}}/>}
+              <span style={{fontSize:18,lineHeight:1}}>{ico}</span>
+              <span style={{fontSize:9,letterSpacing:1.5,fontFamily:"'JetBrains Mono',monospace",fontWeight:active?700:400}}>{lbl}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* VMA MODAL */}
