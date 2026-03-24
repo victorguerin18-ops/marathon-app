@@ -827,52 +827,30 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         </div>
 
         {/* BADGES HEADER */}
-        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+        <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
 
         {/* READINESS BADGE */}
         {checkInSaved && (()=>{
           const r = checkIn.readiness ?? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling);
           const rc = r >= 85 ? "#4ECDC4" : r >= 65 ? "#6BF178" : r >= 45 ? "#FF9F43" : "#FF6B6B";
-          const rl = r >= 85 ? "EXCELLENT" : r >= 65 ? "BON" : r >= 45 ? "MODÉRÉ" : "FATIGUE";
+          const rl = r >= 85 ? "TOP" : r >= 65 ? "BON" : r >= 45 ? "MOY." : "BAS";
           return (
-            <div style={{background:"#0F1117",border:`1px solid ${rc}33`,borderRadius:14,padding:"12px 14px",textAlign:"center",minWidth:76,cursor:"pointer"}}
+            <div style={{background:"#0F1117",border:`1px solid ${rc}33`,borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,cursor:"pointer",flexShrink:0}}
               onClick={()=>setView("today")}>
-              <div style={{fontSize:8,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>READINESS</div>
-              <div style={{fontSize:22,fontWeight:800,color:rc,letterSpacing:-1,lineHeight:1}}>{r}</div>
+              <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>READY</div>
+              <div style={{fontSize:20,fontWeight:800,color:rc,letterSpacing:-1,lineHeight:1}}>{r}</div>
               <div style={{fontSize:8,color:rc,fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{rl}</div>
             </div>
           );
         })()}
 
         {/* VMA BADGE — cliquable */}
-        <div
-          className="vma-badge"
-          onClick={() => setShowVMA(true)}
-          style={{
-            position:"relative",
-            background: vmaChanged ? "linear-gradient(135deg,#001a24,#00D2FF18)" : "#0F1117",
-            border: `1px solid ${vmaChanged ? "#00D2FF55" : "#1C1F27"}`,
-            borderRadius:14,
-            padding:"12px 16px",
-            textAlign:"center",
-            minWidth:90,
-          }}
-        >
-          {/* Ping indicator si VMA calculée différente */}
-          {vmaChanged && (
-            <>
-              <div className="vma-ping" />
-              <div className="vma-dot" />
-            </>
-          )}
-          <div style={{fontSize:8,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA</div>
-          <div style={{fontSize:22,fontWeight:800,color:vmaChanged?"#00D2FF":"#E8E4DC",letterSpacing:-1,lineHeight:1}}>
-            {displayVMA.toFixed(2)}
-          </div>
-          <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>km/h · CALCULÉE</div>
-          <div style={{fontSize:8,color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace",marginTop:2,opacity:0.7}}>
-            ⚡ VOIR DÉTAIL
-          </div>
+        <div className="vma-badge" onClick={() => setShowVMA(true)}
+          style={{position:"relative",background:vmaChanged?"linear-gradient(135deg,#001a24,#00D2FF18)":"#0F1117",border:`1px solid ${vmaChanged?"#00D2FF55":"#1C1F27"}`,borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,flexShrink:0}}>
+          {vmaChanged && (<><div className="vma-ping"/><div className="vma-dot"/></>)}
+          <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA</div>
+          <div style={{fontSize:20,fontWeight:800,color:vmaChanged?"#00D2FF":"#E8E4DC",letterSpacing:-1,lineHeight:1}}>{displayVMA.toFixed(1)}</div>
+          <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>km/h</div>
         </div>
         </div>{/* fin badges header */}
       </div>
