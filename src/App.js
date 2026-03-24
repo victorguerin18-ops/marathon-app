@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { stravaLogin, exchangeToken, fetchActivities } from './strava';
+import { stravaLogin, exchangeToken, fetchActivities, getValidToken } from './strava';
 import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin } from './db';
 import { PlanWizard, PlanSettings, generatePlanFromConfig, defaultConfig, fmtPace } from './PlanWizard';
 
@@ -388,7 +388,7 @@ export default function App() {
   const [view,      setView]      = useState("today");
   const [modal,     setModal]     = useState(null);
   const [loading,   setLoading]   = useState(true);
-  const [stravaConnected, setStravaConnected] = useState(()=>!!STORE.get("strava_token",null));
+  const [stravaConnected, setStravaConnected] = useState(()=>!!localStorage.getItem('strava_access_token'));
   const [stravaLoading,   setStravaLoading]   = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
   const [editForm,  setEditForm]  = useState(null);
@@ -437,9 +437,9 @@ export default function App() {
     const code=params.get('code'); if(!code) return;
     setStravaLoading(true); setSyncStatus("Connexion Strava...");
     exchangeToken(code).then(data=>{
-      STORE.set("strava_token",data.access_token); setStravaConnected(true);
+      setStravaConnected(true);
       setSyncStatus("Import des séances...");
-      fetchActivities(data.access_token).then(async activities=>{
+      fetchActivities().then(async activities=>{
         const ids=new Set(done.map(r=>r.id));
         const news=activities.filter(a=>!ids.has(a.id));
         if(news.length>0){await saveManyDone(news); setDone(prev=>[...prev,...news]);}
@@ -451,9 +451,15 @@ export default function App() {
   },[done]);
 
   async function syncStrava(){
-    const token=STORE.get("strava_token",null); if(!token) return;
     setStravaLoading(true); setSyncStatus("Synchronisation...");
-    const activities=await fetchActivities(token);
+    const token = await getValidToken();
+    if(!token){
+      setStravaConnected(false);
+      setSyncStatus("Session expirée — reconnecte Strava");
+      setTimeout(()=>setSyncStatus(""),4000);
+      setStravaLoading(false); return;
+    }
+    const activities=await fetchActivities();
     const ids=new Set(done.map(r=>r.id));
     const news=activities.filter(a=>!ids.has(a.id));
     if(news.length>0){await saveManyDone(news); setDone(prev=>[...prev,...news]);}
