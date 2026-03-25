@@ -470,7 +470,8 @@ export default function App() {
   const [checkInEditing, setCheckInEditing] = useState(false);
 
   // Modal déplacement séance
-  const [moveModal, setMoveModal] = useState(null); // {session, mode:'swap'|'move'}
+  const [moveModal, setMoveModal] = useState(null);
+  const [editPlannedForm, setEditPlannedForm] = useState(null); // {session, mode:'swap'|'move'}
   const [moveTargetId, setMoveTargetId] = useState(null);
   const [moveDate, setMoveDate] = useState("");
 
@@ -1064,8 +1065,15 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
     await saveDone(r); setDone(prev=>[...prev,r]); setModal(null);
   }
   function openEditPlanned(p) {
-    // Éditer une séance planifiée : on ouvre un modal dédié
-    setModal({ type: "editPlanned", session: p });
+    setEditPlannedForm({
+      id: p.id, date: p.date, generated: p.generated,
+      type: p.type,
+      targetDist: String(p.targetDist),
+      targetDur: String(p.targetDur),
+      targetHR: p.targetHR ? String(p.targetHR) : "",
+      notes: p.notes || "",
+    });
+    setModal({ type: "editPlanned" });
   }
 
   function openEdit(r){
@@ -2250,53 +2258,37 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
         <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(6px)"}}>
           <div onClick={e=>e.stopPropagation()} className="pop" style={{background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))`}}>
 
-            {modal.type==="editPlanned"&&modal.session&&(()=>{
-              const p = modal.session;
-              const [form, setForm] = React.useState({
-                type: p.type, targetDist: String(p.targetDist), targetDur: String(p.targetDur),
-                targetHR: p.targetHR ? String(p.targetHR) : "", notes: p.notes || ""
-              });
-              async function submitEditPlanned() {
-                const updated = {
-                  ...p,
-                  type: form.type,
-                  targetDist: parseFloat(form.targetDist) || p.targetDist,
-                  targetDur: parseInt(form.targetDur) || p.targetDur,
-                  targetHR: form.targetHR ? parseInt(form.targetHR) : null,
-                  notes: form.notes,
-                };
-                await savePlanned(updated);
-                setPlanned(prev => prev.map(s => s.id === updated.id ? updated : s));
-                setModal(null);
-              }
-              const tm = TYPE_META[form.type] || TYPE_META["Footing"];
-              return (<>
-                <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Modifier la séance</div>
-                <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:20}}>{fmtDate(p.date,{weekday:"long",day:"numeric",month:"long"})}</div>
-                <div style={{marginBottom:16}}>
-                  <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {Object.entries(TYPE_META).map(([type,tmeta])=>(
-                      <button key={type} className="type-btn" onClick={()=>setForm(f=>({...f,type}))}
-                        style={{borderColor:form.type===type?tmeta.color:"transparent",color:form.type===type?tmeta.color:"#555",background:form.type===type?tmeta.dark:"transparent",minWidth:70}}>
-                        <div style={{fontSize:16,marginBottom:3}}>{tmeta.icon}</div>
-                        <div>{type.split(' ')[0]}</div>
-                      </button>
-                    ))}
-                  </div>
+            {modal.type==="editPlanned"&&editPlannedForm&&(<>
+              <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Modifier la séance</div>
+              <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:20}}>{fmtDate(editPlannedForm.date,{weekday:"long",day:"numeric",month:"long"})}</div>
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {Object.entries(TYPE_META).map(([type,tmeta])=>(
+                    <button key={type} className="type-btn" onClick={()=>setEditPlannedForm(f=>({...f,type}))}
+                      style={{borderColor:editPlannedForm.type===type?tmeta.color:"transparent",color:editPlannedForm.type===type?tmeta.color:"#555",background:editPlannedForm.type===type?tmeta.dark:"transparent",minWidth:70}}>
+                      <div style={{fontSize:16,marginBottom:3}}>{tmeta.icon}</div>
+                      <div>{type.split(' ')[0]}</div>
+                    </button>
+                  ))}
                 </div>
-                <FormGrid>
-                  <Field label="DISTANCE CIBLE (km)"><input type="number" className="inp" value={form.targetDist} onChange={e=>setForm(f=>({...f,targetDist:e.target.value}))}/></Field>
-                  <Field label="DURÉE CIBLE (min)"><input type="number" className="inp" value={form.targetDur} onChange={e=>setForm(f=>({...f,targetDur:e.target.value}))}/></Field>
-                  <Field label="FC CIBLE (bpm)"><input type="number" className="inp" placeholder="optionnel" value={form.targetHR} onChange={e=>setForm(f=>({...f,targetHR:e.target.value}))}/></Field>
-                  <Field label="NOTES" full><textarea className="inp" rows={2} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{resize:"none"}}/></Field>
-                </FormGrid>
-                <div style={{display:"flex",gap:10,marginTop:24}}>
-                  <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
-                  <button className="btn-primary" onClick={submitEditPlanned} style={{flex:2,background:tm.color,color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>SAUVEGARDER ✓</button>
-                </div>
-              </>);
-            })()}
+              </div>
+              <FormGrid>
+                <Field label="DISTANCE CIBLE (km)"><input type="number" className="inp" value={editPlannedForm.targetDist} onChange={e=>setEditPlannedForm(f=>({...f,targetDist:e.target.value}))}/></Field>
+                <Field label="DURÉE CIBLE (min)"><input type="number" className="inp" value={editPlannedForm.targetDur} onChange={e=>setEditPlannedForm(f=>({...f,targetDur:e.target.value}))}/></Field>
+                <Field label="FC CIBLE (bpm)"><input type="number" className="inp" placeholder="optionnel" value={editPlannedForm.targetHR} onChange={e=>setEditPlannedForm(f=>({...f,targetHR:e.target.value}))}/></Field>
+                <Field label="NOTES" full><textarea className="inp" rows={2} value={editPlannedForm.notes} onChange={e=>setEditPlannedForm(f=>({...f,notes:e.target.value}))} style={{resize:"none"}}/></Field>
+              </FormGrid>
+              <div style={{display:"flex",gap:10,marginTop:24}}>
+                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
+                <button className="btn-primary" onClick={async()=>{
+                  const updated={...editPlannedForm,targetDist:parseFloat(editPlannedForm.targetDist)||0,targetDur:parseInt(editPlannedForm.targetDur)||0,targetHR:editPlannedForm.targetHR?parseInt(editPlannedForm.targetHR):null};
+                  await savePlanned(updated);
+                  setPlanned(prev=>prev.map(s=>s.id===updated.id?updated:s));
+                  setModal(null);
+                }} style={{flex:2,background:TYPE_META[editPlannedForm.type]?.color||"#E8E4DC",color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>SAUVEGARDER ✓</button>
+              </div>
+            </>)}
 
             {modal.type==="plan"&&(<>
               <div style={{fontSize:22,fontWeight:800,marginBottom:24}}>Planifier une séance</div>
