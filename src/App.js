@@ -469,6 +469,11 @@ export default function App() {
   const [checkInSaved, setCheckInSaved] = useState(false);
   const [checkInEditing, setCheckInEditing] = useState(false);
 
+  // Modal déplacement séance
+  const [moveModal, setMoveModal] = useState(null); // {session, mode:'swap'|'move'}
+  const [moveTargetId, setMoveTargetId] = useState(null);
+  const [moveDate, setMoveDate] = useState("");
+
   // Modal débrief post-Strava
   const [stravaDebriefModal, setStravaDebriefModal] = useState(null); // {stravaSession, plannedSession}
   const [debriefForm, setDebriefForm] = useState({rpe:"6", feeling:"3", notes:""});
@@ -855,6 +860,36 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
       await savePlanned(updated);
       setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
       setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Volume réduit — ${updated.targetDist}km · ${updated.targetDur}min` }));
+    }
+  }
+
+  async function applyMove() {
+    if (!moveModal) return;
+    const { session, mode } = moveModal;
+
+    if (mode === "move" && moveDate) {
+      // Déplacer à une date précise
+      const updated = { ...session, date: moveDate };
+      await savePlanned(updated);
+      setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
+      setMoveModal(null);
+      return;
+    }
+
+    if (mode === "swap" && moveTargetId) {
+      // Échanger avec une autre séance
+      const target = planned.find(p => p.id === moveTargetId);
+      if (!target) return;
+      const sA = { ...session, date: target.date };
+      const sB = { ...target, date: session.date };
+      await savePlanned(sA);
+      await savePlanned(sB);
+      setPlanned(prev => prev.map(p => {
+        if (p.id === sA.id) return sA;
+        if (p.id === sB.id) return sB;
+        return p;
+      }));
+      setMoveModal(null);
     }
   }
 
@@ -1566,7 +1601,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
 
                 {(()=>{
                   // Grouper par semaine
-                  const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||done.find(d=>d.plannedId===p.id));
+                  const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||isToday(p.date)||done.find(d=>d.plannedId===p.id));
                   const weeks={};
                   sorted.forEach(p=>{
                     const wk=wkKey(p.date);
@@ -1628,7 +1663,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                         <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
                           {score!==null
                             ?<div style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}</div><div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>SCORE</div></div>
-                            :<button className="btn-ghost" onClick={()=>logSession(p)} style={{borderRadius:8,padding:"6px 12px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>LOG</button>
+                            :<button className="btn-ghost" onClick={()=>{ setMoveModal({session:p, mode:"swap"}); setMoveTargetId(null); setMoveDate(addDays(p.date,1)); }} style={{borderRadius:8,padding:"6px 10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>⇄</button>
                           }
                           {!linked&&(
                             <button onClick={()=>{ if(window.confirm("Supprimer cette séance ?")) deleteSession(p.id); }} style={{
@@ -2043,6 +2078,99 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
           </div>
         </div>
       )}
+
+      {/* ── MODAL DÉPLACEMENT SÉANCE ── */}
+      {moveModal && (()=>{
+        const { session, mode } = moveModal;
+        const tm = TYPE_META[session.type] || TYPE_META["Footing"];
+        // Séances futures disponibles pour l'échange (pas celle-ci, pas déjà faites)
+        const swapCandidates = planned
+          .filter(p => p.id !== session.id && parseDate(p.date) >= parseDate(TODAY_STR) && !done.find(d => d.plannedId === p.id))
+          .sort((a,b) => a.date.localeCompare(b.date))
+          .slice(0, 14); // 2 semaines max
+        return (
+          <div onClick={()=>setMoveModal(null)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,.88)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(8px)"}}>
+            <div onClick={e=>e.stopPropagation()} className="pop"
+              style={{background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",paddingBottom:`calc(28px + env(safe-area-inset-bottom,12px))`}}>
+
+              {/* Header */}
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:10,color:tm.color,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>{tm.icon} DÉPLACER LA SÉANCE</div>
+                <div style={{fontSize:18,fontWeight:800}}>{session.type}</div>
+                <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+                  {fmtDate(session.date,{weekday:"long",day:"numeric",month:"long"})} · {session.targetDist}km
+                </div>
+              </div>
+
+              {/* Sélecteur de mode */}
+              <div style={{display:"flex",gap:8,marginBottom:20}}>
+                {[["swap","⇄ ÉCHANGER","Swapper avec une autre séance"],["move","→ REPORTER","Choisir une nouvelle date"]].map(([m,label,desc])=>(
+                  <button key={m} onClick={()=>setMoveModal(prev=>({...prev,mode:m}))}
+                    style={{flex:1,border:`2px solid ${mode===m?tm.color:"#1C1F27"}`,background:mode===m?tm.color+"22":"transparent",borderRadius:12,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:mode===m?tm.color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{label}</div>
+                    <div style={{fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Mode SWAP : liste des séances */}
+              {mode==="swap" && (
+                <div>
+                  <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>CHOISIR AVEC QUELLE SÉANCE ÉCHANGER</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {swapCandidates.map(target=>{
+                      const ttm = TYPE_META[target.type]||TYPE_META["Footing"];
+                      const isSel = moveTargetId === target.id;
+                      return (
+                        <button key={target.id} onClick={()=>setMoveTargetId(target.id)}
+                          style={{border:`2px solid ${isSel?ttm.color:"#1C1F27"}`,background:isSel?ttm.color+"11":"#080A0E",borderRadius:10,padding:"12px 14px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div>
+                            <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>{fmtDate(target.date,{weekday:"short",day:"numeric",month:"short"})}</div>
+                            <div style={{fontSize:13,fontWeight:700,color:isSel?ttm.color:"#aaa"}}>{ttm.icon} {target.type}</div>
+                            <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{target.targetDist}km · ~{target.targetDur}min</div>
+                          </div>
+                          {isSel && <span style={{fontSize:18,color:ttm.color}}>✓</span>}
+                        </button>
+                      );
+                    })}
+                    {swapCandidates.length===0 && (
+                      <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",padding:14,textAlign:"center"}}>Aucune séance disponible pour l'échange</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Mode MOVE : sélecteur de date */}
+              {mode==="move" && (
+                <div>
+                  <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>NOUVELLE DATE</div>
+                  <input type="date" className="inp" value={moveDate}
+                    onChange={e=>setMoveDate(e.target.value)}
+                    min={TODAY_STR}
+                    style={{marginBottom:8}}/>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>
+                    {moveDate && moveDate !== session.date ? `→ ${fmtDate(moveDate,{weekday:"long",day:"numeric",month:"long"})}` : "Sélectionne une date"}
+                  </div>
+                </div>
+              )}
+
+              {/* Boutons */}
+              <div style={{display:"flex",gap:10,marginTop:20}}>
+                <button className="btn-ghost" onClick={()=>setMoveModal(null)}
+                  style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>
+                  ANNULER
+                </button>
+                <button onClick={applyMove}
+                  disabled={mode==="swap"?!moveTargetId : !moveDate||moveDate===session.date}
+                  style={{flex:2,background:tm.color,color:"#080A0E",border:"none",borderRadius:12,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",opacity:(mode==="swap"?!moveTargetId:!moveDate||moveDate===session.date)?0.4:1}}>
+                  {mode==="swap"?"⇄ ÉCHANGER":"→ REPORTER"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* VMA MODAL */}
       {showVMA && (
