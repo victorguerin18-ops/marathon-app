@@ -549,14 +549,25 @@ export default function App() {
   // Merge Strava activity avec données locales existantes
   // On garde rpe, type, feeling, notes si déjà modifiés manuellement
   function mergeStravaActivity(incoming, existing) {
-    if (!existing) return incoming; // nouvelle séance → tout depuis Strava
+    // Auto-lier à la séance planifiée du même jour si pas encore liée
+    const autoPlannedId = (() => {
+      if (existing?.plannedId) return existing.plannedId; // déjà lié
+      // Chercher une séance planifiée du même jour non encore réalisée
+      const match = planned.find(p =>
+        p.date === incoming.date &&
+        !done.find(d => d.plannedId === p.id && d.id !== incoming.id)
+      );
+      return match?.id || null;
+    })();
+
+    if (!existing) return { ...incoming, plannedId: autoPlannedId };
     return {
-      ...incoming,                          // dist, dur, hr, date depuis Strava
-      type:    existing.type,               // type modifié manuellement conservé
-      rpe:     existing.rpe,               // RPE manuel conservé
-      feeling: existing.feeling,           // ressenti conservé
-      notes:   existing.notes || incoming.notes, // notes conservées (sinon nom Strava)
-      plannedId: existing.plannedId,       // lien séance planifiée conservé
+      ...incoming,                               // dist, dur, hr, date depuis Strava
+      type:      existing.type,                  // type modifié manuellement conservé
+      rpe:       existing.rpe,                   // RPE manuel conservé
+      feeling:   existing.feeling,               // ressenti conservé
+      notes:     existing.notes || incoming.notes,
+      plannedId: existing.plannedId || autoPlannedId, // lien conservé ou auto-détecté
     };
   }
 
@@ -1383,7 +1394,8 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
             )}
             {todayPlanned.map(p=>{
               const tm=TYPE_META[p.type]||TYPE_META["Footing"];
-              const linked=done.find(d=>d.plannedId===p.id);
+              // Chercher par plannedId d'abord, sinon par date (séance Strava non encore liée)
+              const linked=done.find(d=>d.plannedId===p.id) || done.find(d=>d.date===p.date&&d.fromStrava&&!d.plannedId);
               const score=linked?scoreSession(p,linked):null;
               return (
                 <div key={p.id} className="card" style={{padding:22,marginBottom:14,borderLeft:`3px solid ${tm.color}`}}>
