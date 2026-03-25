@@ -479,7 +479,7 @@ export default function App() {
   const [debriefForm, setDebriefForm] = useState({rpe:"6", feeling:"3", notes:""});
 
   // Readiness advisor
-  const [readinessAction, setReadinessAction] = useState(null); // {type:'swap'|'postpone'|'reduce', sessionA, sessionB, done}
+  const [readinessAction, setReadinessAction] = useState(()=>STORE.get('readiness_action_'+TODAY_STR, null));
 
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
@@ -831,7 +831,9 @@ ${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
   // Exécute l'action choisie
   async function applyReadinessAction(action, todaySession) {
     if (action.id === "ignore") {
-      setReadinessAction(prev => ({ ...prev, done: true }));
+      const updated = { done: true, result: null };
+      STORE.set('readiness_action_'+TODAY_STR, updated);
+      setReadinessAction(updated);
       return;
     }
 
@@ -846,7 +848,9 @@ ${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
         if (p.id === sessionB.id) return sessionB;
         return p;
       }));
-      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Séances échangées — ${sessionB.type} déplacé au ${fmtDate(sessionB.date, {weekday:"long", day:"numeric"})}` }));
+      const swapResult = { done: true, result: `✓ Séances échangées — ${sessionB.type} déplacé au ${fmtDate(sessionB.date, {weekday:"long", day:"numeric"})}` };
+      STORE.set('readiness_action_'+TODAY_STR, swapResult);
+      setReadinessAction(swapResult);
     }
 
     if (action.id === "postpone") {
@@ -855,7 +859,9 @@ ${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
       const updated = { ...todaySession, date: tomorrow };
       await savePlanned(updated);
       setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
-      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Séance reportée au ${fmtDate(tomorrow, {weekday:"long", day:"numeric"})}` }));
+      const postponeResult = { done: true, result: `✓ Séance reportée au ${fmtDate(tomorrow, {weekday:"long", day:"numeric"})}` };
+      STORE.set('readiness_action_'+TODAY_STR, postponeResult);
+      setReadinessAction(postponeResult);
     }
 
     if (action.id === "reduce" && action.reduced) {
@@ -863,7 +869,9 @@ ${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
       const updated = { ...action.reduced };
       await savePlanned(updated);
       setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
-      setReadinessAction(prev => ({ ...prev, done: true, result: `✓ Volume réduit — ${updated.targetDist}km · ${updated.targetDur}min` }));
+      const reduceResult = { done: true, result: `✓ Volume réduit — ${updated.targetDist}km · ${updated.targetDur}min` };
+      STORE.set('readiness_action_'+TODAY_STR, reduceResult);
+      setReadinessAction(reduceResult);
     }
   }
 
@@ -1055,6 +1063,11 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
     const r={id:"d"+Date.now(),...logForm,dist:+logForm.dist,dur:+logForm.dur,hr:logForm.hr?+logForm.hr:null,rpe:+logForm.rpe,feeling:+logForm.feeling};
     await saveDone(r); setDone(prev=>[...prev,r]); setModal(null);
   }
+  function openEditPlanned(p) {
+    // Éditer une séance planifiée : on ouvre un modal dédié
+    setModal({ type: "editPlanned", session: p });
+  }
+
   function openEdit(r){
     setEditForm({...r,dist:String(r.dist),dur:String(r.dur),hr:r.hr?String(r.hr):"",rpe:String(r.rpe||6),feeling:String(r.feeling||3)});
     setModal({type:"edit"});
@@ -1612,7 +1625,14 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
 
                 {(()=>{
                   // Grouper par semaine
-                  const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>!isPast(p.date)||isToday(p.date)||done.find(d=>d.plannedId===p.id));
+                  // Inclure : futures, aujourd'hui, et TOUTES les séances de la semaine courante (même passées)
+                  const curWkKey = wkKey(TODAY_STR);
+                  const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>{
+                    if(!isPast(p.date)||isToday(p.date)) return true; // futur ou aujourd'hui
+                    if(wkKey(p.date)===curWkKey) return true; // semaine en cours (passé inclus)
+                    if(done.find(d=>d.plannedId===p.id)) return true; // déjà faite (pour le score)
+                    return false;
+                  });
                   const weeks={};
                   sorted.forEach(p=>{
                     const wk=wkKey(p.date);
@@ -1676,13 +1696,14 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                             ?<div style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:score>79?"#4ECDC4":score>59?"#FFE66D":"#FF6B6B"}}>{score}</div><div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>SCORE</div></div>
                             :<button className="btn-ghost" onClick={()=>{ setMoveModal({session:p, mode:"swap"}); setMoveTargetId(null); setMoveDate(addDays(p.date,1)); }} style={{borderRadius:8,padding:"6px 10px",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>⇄</button>
                           }
-                          {!linked&&(
+                          {!linked&&(<>
+                            <button className="btn-ghost" onClick={()=>openEditPlanned(p)} style={{borderRadius:6,padding:"4px 8px",fontSize:10,fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>✏</button>
                             <button onClick={()=>{ if(window.confirm("Supprimer cette séance ?")) deleteSession(p.id); }} style={{
                               background:"#FF6B6B18",border:"1px solid #FF6B6B33",color:"#FF6B6B88",
                               cursor:"pointer",fontSize:11,padding:"4px 8px",borderRadius:6,
-                              fontFamily:"'JetBrains Mono',monospace",lineHeight:1,marginTop:2,
+                              fontFamily:"'JetBrains Mono',monospace",lineHeight:1,
                             }}>🗑</button>
-                          )}
+                          </>)}
                         </div>
                       </div>
                       {p.notes&&<div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:8,lineHeight:1.5}}>💬 {p.notes}</div>}
@@ -2228,6 +2249,54 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
       {modal&&(
         <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(6px)"}}>
           <div onClick={e=>e.stopPropagation()} className="pop" style={{background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))`}}>
+
+            {modal.type==="editPlanned"&&modal.session&&(()=>{
+              const p = modal.session;
+              const [form, setForm] = React.useState({
+                type: p.type, targetDist: String(p.targetDist), targetDur: String(p.targetDur),
+                targetHR: p.targetHR ? String(p.targetHR) : "", notes: p.notes || ""
+              });
+              async function submitEditPlanned() {
+                const updated = {
+                  ...p,
+                  type: form.type,
+                  targetDist: parseFloat(form.targetDist) || p.targetDist,
+                  targetDur: parseInt(form.targetDur) || p.targetDur,
+                  targetHR: form.targetHR ? parseInt(form.targetHR) : null,
+                  notes: form.notes,
+                };
+                await savePlanned(updated);
+                setPlanned(prev => prev.map(s => s.id === updated.id ? updated : s));
+                setModal(null);
+              }
+              const tm = TYPE_META[form.type] || TYPE_META["Footing"];
+              return (<>
+                <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Modifier la séance</div>
+                <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:20}}>{fmtDate(p.date,{weekday:"long",day:"numeric",month:"long"})}</div>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {Object.entries(TYPE_META).map(([type,tmeta])=>(
+                      <button key={type} className="type-btn" onClick={()=>setForm(f=>({...f,type}))}
+                        style={{borderColor:form.type===type?tmeta.color:"transparent",color:form.type===type?tmeta.color:"#555",background:form.type===type?tmeta.dark:"transparent",minWidth:70}}>
+                        <div style={{fontSize:16,marginBottom:3}}>{tmeta.icon}</div>
+                        <div>{type.split(' ')[0]}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <FormGrid>
+                  <Field label="DISTANCE CIBLE (km)"><input type="number" className="inp" value={form.targetDist} onChange={e=>setForm(f=>({...f,targetDist:e.target.value}))}/></Field>
+                  <Field label="DURÉE CIBLE (min)"><input type="number" className="inp" value={form.targetDur} onChange={e=>setForm(f=>({...f,targetDur:e.target.value}))}/></Field>
+                  <Field label="FC CIBLE (bpm)"><input type="number" className="inp" placeholder="optionnel" value={form.targetHR} onChange={e=>setForm(f=>({...f,targetHR:e.target.value}))}/></Field>
+                  <Field label="NOTES" full><textarea className="inp" rows={2} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{resize:"none"}}/></Field>
+                </FormGrid>
+                <div style={{display:"flex",gap:10,marginTop:24}}>
+                  <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
+                  <button className="btn-primary" onClick={submitEditPlanned} style={{flex:2,background:tm.color,color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>SAUVEGARDER ✓</button>
+                </div>
+              </>);
+            })()}
 
             {modal.type==="plan"&&(<>
               <div style={{fontSize:22,fontWeight:800,marginBottom:24}}>Planifier une séance</div>
