@@ -650,7 +650,7 @@ export default function App() {
   }
 
   function buildCoachContext(){
-    const recentDone=[...done].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,20);
+    const recentDone=[...done].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,15);
     const weeks={};
     done.forEach(r=>{
       const wk=wkKey(r.date);
@@ -658,41 +658,34 @@ export default function App() {
       weeks[wk].dist+=r.dist; weeks[wk].runs++; weeks[wk].rpe.push(r.rpe||5);
     });
     const wkList=Object.entries(weeks).sort(([a],[b])=>b.localeCompare(a)).slice(0,4);
-    const planUpcoming=[...planned].filter(p=>isFuture(p.date)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
+    const planUpcoming=[...planned].filter(p=>parseDate(p.date)>=parseDate(TODAY_STR)).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
     const totalKm=done.reduce((s,r)=>s+r.dist,0);
-    const avgPace=done.filter(r=>r.type==="Endurance fondamentale"&&r.dist>5);
-    const lastPace=avgPace.length? (avgPace[avgPace.length-1].dur*60)/avgPace[avgPace.length-1].dist : null;
+    const efRuns=done.filter(r=>r.type==="Endurance fondamentale"&&r.dist>5).sort((a,b)=>a.date.localeCompare(b.date));
+    const lastPace=efRuns.length?(efRuns[efRuns.length-1].dur*60)/efRuns[efRuns.length-1].dist:null;
+    const todayDone=done.find(d=>d.date===TODAY_STR);
+    const todayPlannedSession=planned.find(p=>p.date===TODAY_STR);
+    const readiness=checkInSaved?(checkIn.readiness??calcReadiness(checkIn.hrv,checkIn.recovery,checkIn.feeling)):null;
+    const ps=protectionScore;
 
-    return `Tu es un coach marathon expert. Voici le profil de l'athlète :
+    return `Tu es le coach marathon de Victor. Sois CONCIS (max 5 phrases sauf si question précise). Pose une question si tu as besoin d'une info manquante. Pas d'intro générique, va droit au but.
 
-PROFIL :
-- Prénom : Victor
-- Objectif : Marathon de Lille, 25 octobre 2026 (${DAYS_LEFT} jours restants, ${WEEKS_LEFT} semaines)
-- VMA actuelle : ${planConfig.vma} km/h
-- Objectif de temps : Sub-3h30 (allure cible ~4'58"/km)
-- Premier marathon
-- 4 séances/semaine (flexible)
-- Utilise Apple Watch + Bevel + Strava
+PROFIL : Victor, Marathon de Lille 25/10/2026 (${DAYS_LEFT}j/${WEEKS_LEFT}sem), sub-3h30, VMA ${planConfig.vma}km/h, allures : EF ${fmtPace(planConfig.paces.ef)}/km · Seuil ${fmtPace(planConfig.paces.tempo)}/km · VMA ${fmtPace(planConfig.paces.vma)}/km · Marathon ~4'58"/km
 
-DONNÉES RÉCENTES :
-- Total km depuis début : ${totalKm.toFixed(0)} km
-- Dernières 4 semaines :
-${wkList.map(([wk,d])=>`  ${wk}: ${d.dist.toFixed(1)}km en ${d.runs} séances, RPE moyen ${(d.rpe.reduce((s,v)=>s+v,0)/d.rpe.length).toFixed(1)}`).join('\n')}
-- Dernière allure EF : ${lastPace?`${fmtPace(lastPace)}/km`:"pas encore de données"}
+ÉTAT DU JOUR :
+- Readiness : ${readiness!==null?`${readiness}/100 (VFC ${checkIn.hrv||'?'}ms, récup ${checkIn.recovery||'?'}%, sensation ${checkIn.feeling===0?'🟢 frais':checkIn.feeling===1?'🟡 correct':checkIn.feeling===2?'🔴 fatigué':'non renseigné'})`:'check-in non fait'}
+- Protection blessure : ${ps.total}/100 (${ps.level.label}) — ACWR ${ps.signals.find(s=>s.key==='ACWR')?.value||'?'}, monotonie ${ps.signals.find(s=>s.key==='MONO')?.value||'?'}
+- Séance du jour prévue : ${todayPlannedSession?`${todayPlannedSession.type} ${todayPlannedSession.targetDist}km`:'aucune'}
+- Séance du jour réalisée : ${todayDone?`${todayDone.type} ${todayDone.dist}km en ${todayDone.dur}min, FC ${todayDone.hr||'?'}bpm, RPE ${todayDone.rpe||'?'}, ressenti ${["😣","😕","😐","🙂","😄"][(todayDone.feeling||3)-1]}`:'pas encore'}
 
-ZONES D'ALLURE (basées VMA ${planConfig.vma} km/h) :
-- Endurance fondamentale : ${fmtPace(planConfig.paces.ef)}/km
-- Tempo/Seuil : ${fmtPace(planConfig.paces.tempo)}/km
-- VMA : ${fmtPace(planConfig.paces.vma)}/km
-- Allure marathon sub-3h30 : ~4'58"/km
+SEMAINES RÉCENTES :
+${wkList.map(([wk,d])=>`${wk}: ${d.dist.toFixed(0)}km, ${d.runs} séances, RPE moy ${(d.rpe.reduce((s,v)=>s+v,0)/d.rpe.length).toFixed(1)}`).join('\n')}
+Total cumulé : ${totalKm.toFixed(0)}km · Dernière allure EF : ${lastPace?`${fmtPace(lastPace)}/km`:'?'}
 
-SÉANCES RÉCENTES (20 dernières) :
-${recentDone.map(r=>`  ${r.date}: ${r.type} ${r.dist}km en ${r.dur}min, FC ${r.hr||'?'}, RPE ${r.rpe||'?'}, ressenti ${["😣","😕","😐","🙂","😄"][(r.feeling||3)-1]}`).join('\n')}
+DERNIÈRES SÉANCES :
+${recentDone.slice(0,8).map(r=>`${r.date} ${r.type.split(' ')[0]} ${r.dist}km ${r.dur}min FC${r.hr||'?'} RPE${r.rpe||'?'} ${["😣","😕","😐","🙂","😄"][(r.feeling||3)-1]}`).join('\n')}
 
 PLAN À VENIR :
-${planUpcoming.map(p=>`  ${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}
-
-Réponds en français, de façon directe et personnalisée comme un vrai coach. Sois précis sur les allures (utilise les min/km). Maximum 3-4 paragraphes courts sauf si l'athlète pose une question précise.`;
+${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
   }
 
   function calcReadiness(hrv, recovery, feeling) {
@@ -909,11 +902,26 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
     const context=buildCoachContext();
     const isWeekly=!userMessage;
 
+    const bilanPrompt = `${context}
+
+BILAN DEMANDÉ — réponds en 4 points courts (1-2 phrases chacun, max) :
+1. SEMAINE : résumé en 1 phrase (volume, qualité, tendance)
+2. SÉANCE DU JOUR : analyse si réalisée, sinon conseil pour celle prévue avec allures précises
+3. ALERTE : mentionne uniquement si protection score < 60 ou ACWR > 1.3, sinon passe
+4. PROCHAINE SÉANCE : type, distance, allure cible en min/km
+
+Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conclusion.`;
+
+    const chatPrompt = `${context}
+
+Question de Victor : ${userMessage}
+Réponds directement en 2-3 phrases max. Si tu manques d'info, pose une seule question courte.`;
+
     const messages = isWeekly
-      ? [{ role:"user", content: context+"\n\nFais un bilan hebdomadaire : 1) ce qui s'est bien passé, 2) ce qui peut être amélioré, 3) conseils concrets pour les 7 prochains jours avec allures précises, 4) un mot de motivation." }]
+      ? [{ role:"user", content: bilanPrompt }]
       : [
           { role:"user", content: context },
-          { role:"assistant", content: coachMsg || "Je suis prêt à t'aider !" },
+          { role:"assistant", content: "Compris, je connais ton profil. Pose ta question." },
           ...chatHistory.flatMap(m=>[
             {role:"user", content:m.user},
             {role:"assistant", content:m.coach}
@@ -1712,76 +1720,100 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
 
         {/* ═══ COACH IA ═══ */}
         {view==="coach" && (
-          <div className="fade-up">
-            <div className="card" style={{padding:22,marginBottom:14,background:"linear-gradient(135deg,#0F1117 0%,#0d1f1a 100%)",border:"1px solid #6BF17822"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div className="fade-up" style={{display:"flex",flexDirection:"column",height:`calc(100vh - 84px - env(safe-area-inset-bottom,16px) - 20px)`}}>
+
+            {/* ── HEADER FIXE ── */}
+            <div style={{flexShrink:0}}>
+              {/* Stats + bouton bilan */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div>
-                  <div style={{fontSize:10,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>✦ COACH IA · MARATHON</div>
-                  <div style={{fontSize:20,fontWeight:800,marginTop:4}}>Bonjour Victor 👋</div>
+                  <div style={{fontSize:10,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>✦ COACH IA</div>
                   <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
-                    {coachDate?`Dernier bilan : ${fmtDate(coachDate,{day:"numeric",month:"long"})}`:"Demande un bilan pour commencer"}
+                    {coachDate?`Bilan du ${fmtDate(coachDate,{day:"numeric",month:"short"})}`:"Pas encore de bilan"}
                   </div>
                 </div>
-                <button onClick={()=>askCoach(null)} className="btn-primary"
-                  style={{background:"#6BF178",color:"#080A0E",borderRadius:12,padding:"10px 14px",fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>
-                  {coachLoading?<span className="spin" style={{color:"#080A0E"}}>↻</span>:"✦ BILAN"}
+                <button onClick={()=>askCoach(null)}
+                  style={{background:"#6BF17822",color:"#6BF178",border:"1px solid #6BF17844",borderRadius:10,padding:"8px 14px",fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",cursor:"pointer",flexShrink:0}}>
+                  {coachLoading&&!chatInput?<span className="spin" style={{color:"#6BF178"}}>↻</span>:"✦ BILAN"}
                 </button>
               </div>
-              <div style={{display:"flex",gap:8}}>
+
+              {/* Stats rapides */}
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
                 {[
-                  ["VMA",`${planConfig.vma} km/h`,"#00D2FF"],
-                  ["ALLURE CIBLE","4'58\"/km","#FFE66D"],
-                  ["KM TOTAL",`${totalKm.toFixed(0)}km`,"#6BF178"],
+                  ["VMA",`${planConfig.vma}km/h`,"#00D2FF"],
+                  ["PROTECT.",`${protectionScore.total}/100`,protectionScore.level.color],
+                  ["READINESS",checkInSaved?`${checkIn.readiness??calcReadiness(checkIn.hrv,checkIn.recovery,checkIn.feeling)}/100`:"—","#6BF178"],
+                  ["KM",`${totalKm.toFixed(0)}km`,"#FFE66D"],
                 ].map(([l,v,c])=>(
-                  <div key={l} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
-                    <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{l}</div>
-                    <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                  <div key={l} style={{flex:1,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                    <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3,letterSpacing:1}}>{l}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:c}}>{v}</div>
                   </div>
                 ))}
               </div>
+
+              {/* Bilan compact — affiché si disponible */}
+              {coachMsg&&(
+                <div style={{background:"#0d1f14",border:"1px solid #6BF17822",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+                  <div style={{fontSize:9,color:"#6BF178",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>✦ DERNIER BILAN</div>
+                  <div style={{fontSize:12,color:"#ccc",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{coachMsg}</div>
+                </div>
+              )}
+              {coachLoading&&!chatInput&&(
+                <div style={{background:"#0d1f14",border:"1px solid #6BF17822",borderRadius:12,padding:"14px",marginBottom:10,textAlign:"center"}}>
+                  <span className="pulse" style={{fontSize:16,color:"#6BF178"}}>✦</span>
+                  <span style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginLeft:8}}>Analyse en cours...</span>
+                </div>
+              )}
+
+              {/* Séparateur */}
+              {chatHistory.length>0&&<div style={{height:1,background:"#1C1F27",marginBottom:8}}/>}
             </div>
 
-            {coachMsg&&(
-              <div className="card" style={{padding:22,marginBottom:14,border:"1px solid #6BF17833"}}>
-                <div style={{fontSize:9,color:"#6BF178",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:12}}>✦ MESSAGE DU COACH</div>
-                <div style={{fontSize:13,color:"#ccc",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{coachMsg}</div>
-              </div>
-            )}
-
-            {coachLoading&&!coachMsg&&(
-              <div className="card" style={{padding:28,marginBottom:14,textAlign:"center"}}>
-                <div className="pulse" style={{fontSize:32,marginBottom:12}}>✦</div>
-                <div style={{fontSize:12,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>Le coach analyse tes données...</div>
-              </div>
-            )}
-
-            {chatHistory.length>0&&(
-              <div style={{marginBottom:14}}>
-                {chatHistory.map((m,i)=>(
-                  <div key={i} style={{marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"flex-end",marginBottom:6}}>
-                      <div style={{background:"#1C1F27",borderRadius:"12px 12px 4px 12px",padding:"10px 14px",maxWidth:"80%",fontSize:13,color:"#E8E4DC"}}>{m.user}</div>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"flex-start"}}>
-                      <div style={{background:"#0d2b0f",border:"1px solid #6BF17833",borderRadius:"4px 12px 12px 12px",padding:"10px 14px",maxWidth:"90%",fontSize:13,color:"#ccc",lineHeight:1.7}}>{m.coach}</div>
-                    </div>
+            {/* ── ZONE CHAT SCROLLABLE ── */}
+            <div style={{flex:1,overflowY:"auto",paddingBottom:8}}>
+              {chatHistory.length===0&&!coachMsg&&(
+                <div style={{textAlign:"center",padding:"32px 20px"}}>
+                  <div style={{fontSize:32,marginBottom:12}}>✦</div>
+                  <div style={{fontSize:13,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
+                    Pose une question ou demande un bilan.<br/>
+                    <span style={{color:"#333",fontSize:11}}>Ex: "Mes allures EF progressent ?" · "Prochaine séance ?"</span>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              )}
+              {chatHistory.map((m,i)=>(
+                <div key={i} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"flex-end",marginBottom:5}}>
+                    <div style={{background:"#1C1F27",borderRadius:"12px 12px 4px 12px",padding:"10px 14px",maxWidth:"82%",fontSize:13,color:"#E8E4DC",lineHeight:1.5}}>{m.user}</div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"flex-start"}}>
+                    <div style={{background:"#0d1f14",border:"1px solid #6BF17822",borderRadius:"4px 12px 12px 12px",padding:"10px 14px",maxWidth:"90%",fontSize:13,color:"#ccc",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.coach}</div>
+                  </div>
+                </div>
+              ))}
+              {coachLoading&&chatInput&&(
+                <div style={{display:"flex",justifyContent:"flex-start",marginBottom:10}}>
+                  <div style={{background:"#0d1f14",border:"1px solid #6BF17822",borderRadius:"4px 12px 12px 12px",padding:"10px 14px"}}>
+                    <span className="pulse" style={{color:"#6BF178",fontSize:14}}>✦</span>
+                  </div>
+                </div>
+              )}
+            </div>
 
-            <div style={{position:"sticky",bottom:0,paddingBottom:4,background:"#080A0E",paddingTop:8}}>
+            {/* ── INPUT FIXE EN BAS ── */}
+            <div style={{flexShrink:0,paddingTop:8,borderTop:"1px solid #1C1F27"}}>
               <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-                <textarea className="chat-inp" rows={2} value={chatInput}
+                <textarea className="chat-inp" rows={1} value={chatInput}
                   onChange={e=>setChatInput(e.target.value)}
                   onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}}}
-                  placeholder="Pose une question au coach..."/>
-                <button onClick={sendChat} className="btn-primary"
-                  style={{background:"#6BF178",color:"#080A0E",borderRadius:12,padding:"14px",fontSize:16,flexShrink:0,height:54}}>
-                  {coachLoading?<span className="spin" style={{color:"#080A0E",fontSize:14}}>↻</span>:"→"}
+                  placeholder="Message au coach..."
+                  style={{resize:"none",minHeight:40,maxHeight:100}}/>
+                <button onClick={sendChat}
+                  style={{background:"#6BF178",color:"#080A0E",border:"none",borderRadius:10,padding:"10px 14px",fontSize:16,flexShrink:0,cursor:"pointer",height:42}}>
+                  {coachLoading&&chatInput?<span className="spin" style={{color:"#080A0E",fontSize:13}}>↻</span>:"→"}
                 </button>
               </div>
-              <div style={{fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:6,textAlign:"center"}}>Propulsé par Claude · Données Strava · VMA {planConfig.vma} km/h</div>
             </div>
           </div>
         )}
