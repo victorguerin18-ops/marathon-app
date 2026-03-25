@@ -484,9 +484,9 @@ export default function App() {
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
-  const [volSmooth,  setVolSmooth]  = useState(false);
+  const volSmooth = false;
   const [pacePeriod, setPacePeriod] = useState("all");
-  const [paceSmooth, setPaceSmooth] = useState(false);
+  const paceSmooth = false;
   const [varPeriod,  setVarPeriod]  = useState("4w");
 
   // Coach state
@@ -911,11 +911,6 @@ BILAN DEMANDÉ — réponds en 4 points courts (1-2 phrases chacun, max) :
 4. PROCHAINE SÉANCE : type, distance, allure cible en min/km
 
 Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conclusion.`;
-
-    const chatPrompt = `${context}
-
-Question de Victor : ${userMessage}
-Réponds directement en 2-3 phrases max. Si tu manques d'info, pose une seule question courte.`;
 
     const messages = isWeekly
       ? [{ role:"user", content: bilanPrompt }]
