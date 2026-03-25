@@ -484,9 +484,9 @@ export default function App() {
   // Chart state
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
-  const [volSmooth,  setVolSmooth]  = useState(true);
+  const [volSmooth,  setVolSmooth]  = useState(false);
   const [pacePeriod, setPacePeriod] = useState("all");
-  const [paceSmooth, setPaceSmooth] = useState(true);
+  const [paceSmooth, setPaceSmooth] = useState(false);
   const [varPeriod,  setVarPeriod]  = useState("4w");
 
   // Coach state
@@ -1183,11 +1183,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
         </div>{/* fin badges header */}
       </div>
 
-      <div style={{padding:"12px 20px 0"}}>
-        <div style={{height:3,background:"#1C1F27",borderRadius:2}}>
-          <div style={{height:3,width:`${Math.round((32-WEEKS_LEFT)/32*100)}%`,background:"linear-gradient(90deg,#4ECDC4,#FFE66D)",borderRadius:2}}/>
-        </div>
-      </div>
+
 
 
 
@@ -1820,10 +1816,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>VOLUME HEBDOMADAIRE</div>
                   <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{selVolMetric.desc}</div>
                 </div>
-                <div style={{display:"flex",gap:4}}>
-                  <button className={`smooth-btn${volSmooth?" active":""}`} onClick={()=>setVolSmooth(true)}>∿ LISSÉ</button>
-                  <button className={`smooth-btn${!volSmooth?" active":""}`} onClick={()=>setVolSmooth(false)}>∧ BRUT</button>
-                </div>
+
               </div>
               <div style={{display:"flex",gap:4,background:"#080A0E",borderRadius:8,padding:3,marginBottom:10}}>
                 {METRICS.map(m=>(
@@ -1862,10 +1855,7 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>PROGRESSION ALLURE</div>
                   <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>EF &gt;5km · bas = plus rapide 🏃</div>
                 </div>
-                <div style={{display:"flex",gap:4}}>
-                  <button className={`smooth-btn${paceSmooth?" active":""}`} onClick={()=>setPaceSmooth(true)}>∿ LISSÉ</button>
-                  <button className={`smooth-btn${!paceSmooth?" active":""}`} onClick={()=>setPaceSmooth(false)}>∧ BRUT</button>
-                </div>
+
               </div>
               <div style={{display:"flex",gap:4,marginBottom:14}}>
                 {PERIODS.map(p=>(
