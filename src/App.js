@@ -469,6 +469,10 @@ export default function App() {
   const [checkInSaved, setCheckInSaved] = useState(false);
   const [checkInEditing, setCheckInEditing] = useState(false);
 
+  // Modal débrief post-Strava
+  const [stravaDebriefModal, setStravaDebriefModal] = useState(null); // {stravaSession, plannedSession}
+  const [debriefForm, setDebriefForm] = useState({rpe:"6", feeling:"3", notes:""});
+
   // Readiness advisor
   const [readinessAction, setReadinessAction] = useState(null); // {type:'swap'|'postpone'|'reduce', sessionA, sessionB, done}
 
@@ -494,6 +498,26 @@ export default function App() {
       setPlanned(p); setDone(d);
       if(ci){ setCheckIn(ci); setCheckInSaved(true); }
       setLoading(false);
+      // Auto-sync Strava silencieux au chargement si connecté
+      const token = await getValidToken();
+      if(token) {
+        try {
+          const activities = await fetchActivities();
+          const existingMap = new Map(d.map(r=>[r.id,r]));
+          const toSave = activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id)));
+          const newOnes = toSave.filter(a=>!existingMap.has(a.id));
+          if(newOnes.length>0){
+            await saveManyDone(toSave);
+            setDone(prev=>{
+              const m=new Map(prev.map(r=>[r.id,r]));
+              toSave.forEach(a=>m.set(a.id,a));
+              const updated=Array.from(m.values());
+              checkForTodayStravaDebrief(updated, p);
+              return updated;
+            });
+          }
+        } catch(e){ /* silencieux */ }
+      }
     }
     init();
   },[]);
@@ -544,9 +568,22 @@ export default function App() {
     const existingMap=new Map(done.map(r=>[r.id,r]));
     const toSave=activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id)));
     const newCount=toSave.filter(a=>!existingMap.has(a.id)).length;
-    if(toSave.length>0){await saveManyDone(toSave); setDone(prev=>{const m=new Map(prev.map(r=>[r.id,r])); toSave.forEach(a=>m.set(a.id,a)); return Array.from(m.values());});}
+    if(toSave.length>0){await saveManyDone(toSave); setDone(prev=>{const m=new Map(prev.map(r=>[r.id,r])); toSave.forEach(a=>m.set(a.id,a)); const updated=Array.from(m.values()); checkForTodayStravaDebrief(updated, planned); return updated;});}
     setSyncStatus(`✓ ${newCount} nouvelles · ${toSave.length-newCount} mises à jour`);
     setTimeout(()=>setSyncStatus(""),3000); setStravaLoading(false);
+  }
+
+  // Ouvre le modal débrief si une séance Strava du jour vient d'arriver sans débrief
+  function checkForTodayStravaDebrief(doneList, plannedList) {
+    const todayStrava = doneList.find(d => d.date === TODAY_STR && d.fromStrava);
+    if (!todayStrava) return;
+    // Déjà débriefé si rpe a été modifié manuellement (> valeur auto estimateRPE)
+    // On détecte via un flag ou si feeling !== 3 (valeur par défaut Strava)
+    if (todayStrava.feeling !== 3 || STORE.get("debriefed_"+todayStrava.id, false)) return;
+    // Trouver la séance planifiée du jour
+    const planned = plannedList.find(p => p.date === TODAY_STR) || null;
+    setStravaDebriefModal({ stravaSession: todayStrava, plannedSession: planned });
+    setDebriefForm({ rpe: String(todayStrava.rpe || 6), feeling: "3", notes: todayStrava.notes || "" });
   }
 
   async function generateAndSavePlan(cfg){
@@ -949,6 +986,22 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
       :{date:TODAY_STR,plannedId:"",type:"Endurance fondamentale",dist:"",dur:"",hr:"",rpe:"6",feeling:"3",notes:""});
     setModal({type:"log"});
   }
+  async function submitDebrief() {
+    if (!stravaDebriefModal) return;
+    const { stravaSession } = stravaDebriefModal;
+    // Mettre à jour uniquement rpe, feeling, notes — dist/dur/hr restent depuis Strava
+    const updated = {
+      ...stravaSession,
+      rpe: parseInt(debriefForm.rpe),
+      feeling: parseInt(debriefForm.feeling),
+      notes: debriefForm.notes || stravaSession.notes,
+    };
+    await saveDone(updated);
+    setDone(prev => prev.map(r => r.id === updated.id ? updated : r));
+    STORE.set("debriefed_"+stravaSession.id, true);
+    setStravaDebriefModal(null);
+  }
+
   async function submitLog(){
     const r={id:"d"+Date.now(),...logForm,dist:+logForm.dist,dur:+logForm.dur,hr:logForm.hr?+logForm.hr:null,rpe:+logForm.rpe,feeling:+logForm.feeling};
     await saveDone(r); setDone(prev=>[...prev,r]); setModal(null);
@@ -1319,7 +1372,15 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
                   </div>
                   {p.notes&&<div style={{fontSize:12,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:14,padding:"10px 12px",background:"#080A0E",borderRadius:8}}>{p.notes}</div>}
                   {!linked
-                    ?<button className="btn-primary" onClick={()=>logSession(p)} style={{background:tm.color,color:"#080A0E",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,width:"100%"}}>✓ ENREGISTRER LA SÉANCE</button>
+                    ?<div>
+                      {/* Séance non encore importée depuis Strava */}
+                      <div style={{padding:"12px 14px",background:"#080A0E",borderRadius:10,marginBottom:10,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,textAlign:"center"}}>
+                        ⏳ En attente de l'import Strava...
+                      </div>
+                      <button className="btn-ghost" onClick={()=>logSession(p)} style={{width:"100%",borderRadius:10,padding:"10px 0",fontSize:11,fontFamily:"'JetBrains Mono',monospace"}}>
+                        ✎ Saisir manuellement (sans montre)
+                      </button>
+                    </div>
                     :<div>
                       <div style={{display:"flex",gap:12,marginBottom:10}}>
                         {[["DIST",`${linked.dist} km`],["DURÉE",`${linked.dur} min`],["ALLURE",pace(linked.dist,linked.dur)]].map(([l,v])=>(
@@ -1903,6 +1964,85 @@ Réponds en français, de façon directe et personnalisée comme un vrai coach. 
           );
         })}
       </div>
+
+      {/* ── MODAL DÉBRIEF POST-STRAVA ── */}
+      {stravaDebriefModal && (
+        <div onClick={()=>setStravaDebriefModal(null)}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,.88)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(8px)"}}>
+          <div onClick={e=>e.stopPropagation()} className="pop"
+            style={{background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))`}}>
+
+            {/* Header */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:10,color:"#4ECDC4",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>🏃 SÉANCE DÉTECTÉE VIA STRAVA</div>
+              <div style={{fontSize:20,fontWeight:800}}>{stravaDebriefModal.stravaSession.type}</div>
+              <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+                Comment s'est passée cette sortie ?
+              </div>
+            </div>
+
+            {/* Stats Strava */}
+            <div style={{display:"flex",gap:8,marginBottom:20}}>
+              {[
+                ["DISTANCE", `${stravaDebriefModal.stravaSession.dist} km`],
+                ["DURÉE",    `${stravaDebriefModal.stravaSession.dur} min`],
+                ["ALLURE",   pace(stravaDebriefModal.stravaSession.dist, stravaDebriefModal.stravaSession.dur)],
+                ...(stravaDebriefModal.stravaSession.hr ? [["FC MOY", `${stravaDebriefModal.stravaSession.hr} bpm`]] : []),
+              ].map(([l,v])=>(
+                <div key={l} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"10px 6px",textAlign:"center",border:"1px solid #FC4C0233"}}>
+                  <div style={{fontSize:8,color:"#FC4C02",fontFamily:"'JetBrains Mono',monospace",marginBottom:4,letterSpacing:1}}>{l}</div>
+                  <div style={{fontSize:13,fontWeight:700}}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* RPE */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>EFFORT PERÇU · {debriefForm.rpe}/10</div>
+              <input type="range" min="1" max="10" value={debriefForm.rpe}
+                onChange={e=>setDebriefForm(f=>({...f,rpe:e.target.value}))}
+                style={{width:"100%",accentColor:"#FFE66D"}}/>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
+                <span>LÉGER</span><span>MODÉRÉ</span><span>MAX</span>
+              </div>
+            </div>
+
+            {/* Ressenti */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>RESSENTI</div>
+              <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+                {FEELINGS.map((f,i)=>(
+                  <button key={i} onClick={()=>setDebriefForm(df=>({...df,feeling:String(i+1)}))}
+                    style={{fontSize:28,background:"transparent",border:`2px solid ${+debriefForm.feeling===i+1?"#FFE66D":"transparent"}`,borderRadius:10,padding:"4px 8px",cursor:"pointer"}}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>NOTES (optionnel)</div>
+              <textarea className="inp" rows={2} placeholder="Conditions, sensations, douleurs..."
+                value={debriefForm.notes}
+                onChange={e=>setDebriefForm(f=>({...f,notes:e.target.value}))}
+                style={{resize:"none"}}/>
+            </div>
+
+            {/* Boutons */}
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn-ghost" onClick={()=>setStravaDebriefModal(null)}
+                style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>
+                PLUS TARD
+              </button>
+              <button onClick={submitDebrief}
+                style={{flex:2,background:"#4ECDC4",color:"#080A0E",border:"none",borderRadius:12,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                ENREGISTRER ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* VMA MODAL */}
       {showVMA && (
