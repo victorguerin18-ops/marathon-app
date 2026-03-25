@@ -525,7 +525,7 @@ export default function App() {
       }
     }
     init();
-  },[]);
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
@@ -544,7 +544,7 @@ export default function App() {
       });
       window.history.replaceState({},'','/');
     }).catch(()=>{setStravaLoading(false);setSyncStatus("");});
-  },[done]);
+  },[done]);// eslint-disable-line react-hooks/exhaustive-deps
 
   // Merge Strava activity avec données locales existantes
   // On garde rpe, type, feeling, notes si déjà modifiés manuellement
