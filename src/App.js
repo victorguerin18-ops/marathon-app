@@ -1010,6 +1010,33 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
     });
   },[done,volPeriod,volMetric]);
 
+  // Volume hebdomadaire PRÉVU (séances planifiées futures)
+  const plannedVolumeData = useMemo(() => {
+    const weeks = {};
+    planned.forEach(p => {
+      if (!p.targetDist) return;
+      const wk = wkKey(p.date);
+      if (!weeks[wk]) weeks[wk] = { dist: 0, count: 0 };
+      weeks[wk].dist += p.targetDist;
+      weeks[wk].count++;
+    });
+    // Trier et formater comme Chart attend
+    return Object.entries(weeks)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .slice(0, 20) // max 20 semaines
+      .map(([wk, d]) => {
+        const [,mm,dd] = wk.split('-');
+        const isCurrentWk = wkKey(TODAY_STR) === wk;
+        return {
+          wk,
+          dist: Math.round(d.dist * 10) / 10,
+          count: d.count,
+          label: isCurrentWk ? 'Auj.' : `${parseInt(dd)}/${parseInt(mm)}`,
+          value: Math.round(d.dist * 10) / 10,
+        };
+      });
+  }, [planned]);
+
   const paceData=useMemo(()=>{
     const sel=PERIODS.find(p=>p.key===pacePeriod);
     const cutoff=sel?.days?addDays(TODAY_STR,-sel.days):null;
@@ -1723,6 +1750,41 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                     );
                   });
                 })()}
+
+                {/* ── GRAPHE VOLUME PRÉVU ── */}
+                {plannedVolumeData.length > 1 && (
+                  <div className="card" style={{padding:20,marginTop:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                      <div>
+                        <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>VOLUME PLANIFIÉ</div>
+                        <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>Kilomètres prévus par semaine</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:"#00D2FF"}}>
+                          {Math.round(plannedVolumeData.reduce((s,d)=>s+d.value,0)/plannedVolumeData.length)}
+                          <span style={{fontSize:11,color:"#555",fontWeight:400}}> km moy.</span>
+                        </div>
+                        <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>
+                          pic {Math.max(...plannedVolumeData.map(d=>d.value))} km
+                        </div>
+                      </div>
+                    </div>
+                    <Chart data={plannedVolumeData} color="#00D2FF" formatY={v=>`${v}km`} smooth={false}/>
+                    <div style={{display:"flex",gap:8,marginTop:14}}>
+                      {[
+                        ["SEMAINES",`${plannedVolumeData.length}`,"#555"],
+                        ["VOLUME MOY",`${Math.round(plannedVolumeData.reduce((s,d)=>s+d.value,0)/plannedVolumeData.length)} km`,"#00D2FF"],
+                        ["PIC",`${Math.max(...plannedVolumeData.map(d=>d.value))} km`,"#FF9F43"],
+                        ["TOTAL",`${Math.round(plannedVolumeData.reduce((s,d)=>s+d.value,0))} km`,"#6BF178"],
+                      ].map(([l,v,c])=>(
+                        <div key={l} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"10px 6px",textAlign:"center"}}>
+                          <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3,letterSpacing:1}}>{l}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div>
