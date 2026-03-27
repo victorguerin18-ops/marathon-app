@@ -348,7 +348,7 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
     // SL ~28%, EF×2 ~50%, VMA/Seuil ~22%
     const slTargetDist   = baseVol * 0.28 * progConf.slMult;
     const efTargetDist   = baseVol * 0.25; // par séance EF (×2 = 50%)
-    const qualTargetDist = baseVol * 0.22 * progConf.qualMult;
+    // qualTargetDist retiré (non utilisé)
 
     const activeTpl = (weekNum % 2 === 0) ? weekTemplate : (weekTemplateB || weekTemplate);
     const tplSlot   = activeTpl.find(s=>s.slot===slotIdx);
