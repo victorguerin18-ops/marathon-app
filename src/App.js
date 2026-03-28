@@ -66,51 +66,74 @@ function scoreSession(planned,done) {
 // Ratios physiologiques : allure observée → VMA estimée
 // VMA (km/h) = distance / durée → pace_s = 3600/vma_kmh
 // Si pace_ef = X sec/km, alors VMA = 3600 / (X / ratio_ef)
-const VMA_RATIO = {
-  "Endurance fondamentale": { ratio: 0.70, label: "EF", color: "#6BF178", desc: "~70% VMA", weight: 2 },
-  "Sortie longue":          { ratio: 0.72, label: "SL", color: "#C77DFF", desc: "~72% VMA", weight: 2 },
-  "Tempo / Seuil":          { ratio: 0.86, label: "SEUIL", color: "#FF9F43", desc: "~86% VMA", weight: 3 },
-  "Fractionné / VMA":       { ratio: 0.98, label: "VMA", color: "#FF6B6B", desc: "~98% VMA (exclu)", weight: 4, exclude: true },
-};
+// ─── VMA CALCULATOR ──────────────────────────────────────────────────
+// Basé en priorité sur les tests Évaluation VMA (test 6 min)
+// Formule test 6 min : VMA (km/h) = distance_m / 100 × 0.5
+// (distance couverte en 6 min = ~50% de la distance que tu parcourirais à VMA pure)
+// Fallback : estimation depuis Seuil uniquement (type le moins sensible aux conditions)
 
 function computeVMA(doneList) {
-  const cutoff = addDays(TODAY_STR, -28); // 4 semaines
-  const recent = doneList.filter(r => r.date >= cutoff && r.dist > 0 && r.dur > 0);
+  // ── Priorité 1 : Tests Évaluation VMA (test 6 min) ──────────────────
+  // La séance "Évaluation VMA" est enregistrée avec dist = distance couverte en 6 min
+  const evalTests = [...doneList]
+    .filter(r => r.type === "Évaluation VMA" && r.dist > 0 && r.dur > 0)
+    .sort((a, b) => b.date.localeCompare(a.date)); // plus récent en premier
 
-  const results = {};
-  Object.entries(VMA_RATIO).forEach(([type, meta]) => {
-    // Exclure Fractionné/VMA : allure moyenne faussée par échauffement/récup
-    if (meta.exclude) return;
-    const sessions = recent.filter(r => r.type === type && r.dist >= 4);
-    if (sessions.length === 0) return;
-    // Allure moyenne en sec/km
-    const paces = sessions.map(r => (r.dur * 60) / r.dist);
-    const avgPace = paces.reduce((s, v) => s + v, 0) / paces.length;
-    // VMA estimée : si on court à X% de VMA → VMA = pace_s / ratio × (3600/3600) en km/h
-    const vmaKmh = (3600 / avgPace) / meta.ratio; // vitesse constatée (km/h) ÷ ratio
-    const paceAtVMA = 3600 / vmaKmh; // sec/km à 100% VMA
-    results[type] = {
-      ...meta,
-      avgPace,            // sec/km constaté
-      vmaEstimate: vmaKmh,
-      paceAtVMA,
-      sessions: sessions.length,
-      pct: Math.round(meta.ratio * 100),
+  if (evalTests.length > 0) {
+    const latest = evalTests[0];
+    // Formule Cooper 6 min : VMA ≈ dist_km / 0.1 (règle simplifiée)
+    // Si dist = 1.8km en 6 min → VMA ≈ 18 km/h (vitesse réelle × correction)
+    // Vitesse moyenne = dist_km / (dur_min / 60) = dist_km × 60 / dur_min
+    const avgSpeedKmh = (latest.dist / latest.dur) * 60;
+    // VMA ≈ vitesse moyenne × 1.05 (légère correction Cooper)
+    const vmaFromTest = Math.round(avgSpeedKmh * 1.05 * 100) / 100;
+
+    // Historique des tests
+    const testHistory = evalTests.slice(0, 5).map(t => ({
+      date: t.date,
+      dist: t.dist,
+      dur: t.dur,
+      vma: Math.round((t.dist / t.dur * 60 * 1.05) * 100) / 100,
+    }));
+
+    return {
+      source: "test",
+      finalVMA: vmaFromTest,
+      latestTest: latest,
+      testHistory,
+      breakdown: null, // pas de breakdown par type pour les tests
     };
-  });
+  }
 
-  if (Object.keys(results).length === 0) return null;
+  // ── Priorité 2 : Estimation depuis Seuil uniquement ──────────────────
+  // Le Seuil est le type le moins sensible aux conditions externes
+  // (contrairement à l'EF qui varie énormément avec la chaleur, fatigue, terrain)
+  const cutoff = addDays(TODAY_STR, -56); // 8 semaines (plus de données = plus fiable)
+  const seuilSessions = doneList.filter(r =>
+    r.type === "Tempo / Seuil" && r.dist >= 6 && r.dur > 0 && r.date >= cutoff
+  );
 
-  // Moyenne pondérée (séances non exclues uniquement)
-  let totalWeight = 0, weightedVMA = 0;
-  Object.values(results).forEach(r => {
-    if (r.exclude) return;
-    weightedVMA += r.vmaEstimate * r.weight;
-    totalWeight += r.weight;
-  });
-  const finalVMA = Math.round((weightedVMA / totalWeight) * 100) / 100;
+  if (seuilSessions.length >= 2) {
+    // Prendre les 3 meilleures allures (pas la moyenne — on veut le potentiel)
+    const paces = seuilSessions
+      .map(r => ({ pace: (r.dur * 60) / r.dist, date: r.date }))
+      .sort((a, b) => a.pace - b.pace) // plus rapide en premier
+      .slice(0, 3);
+    const bestPace = paces[0].pace;
+    // Seuil ≈ 87% VMA
+    const vmaEstimate = Math.round((3600 / bestPace / 0.87) * 100) / 100;
 
-  return { breakdown: results, finalVMA };
+    return {
+      source: "seuil",
+      finalVMA: vmaEstimate,
+      latestTest: null,
+      testHistory: [],
+      breakdown: { seuilPace: bestPace, seuilSessions: seuilSessions.length },
+    };
+  }
+
+  // ── Pas assez de données ─────────────────────────────────────────────
+  return null;
 }
 
 // ─── PROTECTION SCORE ────────────────────────────────────────────────
@@ -186,179 +209,86 @@ function fmtPaceStr(secPerKm) {
 // ─── VMA MODAL ───────────────────────────────────────────────────────
 function VMAModal({ done, currentVMA, onClose }) {
   const result = useMemo(() => computeVMA(done), [done]);
-
-  const rows = Object.entries(VMA_RATIO).map(([type, meta]) => {
-    const data = result?.breakdown?.[type];
-    return { type, meta, data };
-  });
-
   const finalVMA = result?.finalVMA ?? currentVMA;
   const diff = (finalVMA - currentVMA).toFixed(2);
   const diffPositive = finalVMA > currentVMA;
+  const isFromTest = result?.source === "test";
+  const isFromSeuil = result?.source === "seuil";
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,
-        display:"flex",alignItems:"flex-end",justifyContent:"center",
-        backdropFilter:"blur(10px)",
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width:"100%",maxWidth:480,background:"#0F1117",
-          border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",
-          padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom, 12px))",
-          maxHeight:"88vh",overflowY:"auto",
-          animation:"popUp .28s cubic-bezier(.22,1,.36,1) forwards",
-        }}
-      >
-        {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:480,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))",maxHeight:"88vh",overflowY:"auto",animation:"popUp .28s cubic-bezier(.22,1,.36,1) forwards"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
           <div>
-            <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>⚡ VMA CALCULÉE</div>
+            <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>⚡ VMA</div>
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
               <span style={{fontSize:44,fontWeight:800,letterSpacing:-2,color:"#E8E4DC"}}>{finalVMA.toFixed(2)}</span>
               <span style={{fontSize:16,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>km/h</span>
             </div>
             {result && (
               <div style={{fontSize:11,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
-                <span style={{color:diffPositive?"#6BF178":"#FF9F43"}}>
-                  {diffPositive?"▲":"▼"} {Math.abs(+diff)} km/h
-                </span>
-                <span style={{color:"#444",marginLeft:6}}>vs config actuelle ({currentVMA} km/h)</span>
+                <span style={{color:diffPositive?"#6BF178":"#FF9F43"}}>{diffPositive?"▲":"▼"} {Math.abs(+diff)} km/h</span>
+                <span style={{color:"#444",marginLeft:6}}>vs config ({currentVMA} km/h)</span>
               </div>
             )}
-            {!result && (
-              <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
-                Pas assez de données (4 sem.) · config actuelle
-              </div>
-            )}
+            {!result && <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>Pas de données · affiche ta config</div>}
           </div>
-          <button
-            onClick={onClose}
-            style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}
-          >✕</button>
+          <button onClick={onClose} style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
 
-        {/* Sub-header */}
-        <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:20,lineHeight:1.7,padding:"12px 14px",background:"#080A0E",borderRadius:10,border:"1px solid #1C1F27"}}>
-          Calculé à partir de tes <span style={{color:"#E8E4DC"}}>4 dernières semaines</span> de séances · chaque type d'entraînement correspond à un % physiologique de ta VMA réelle
+        <div style={{marginBottom:20,padding:"12px 14px",background:"#080A0E",borderRadius:10,border:`1px solid ${isFromTest?"#00D2FF33":isFromSeuil?"#FF9F4333":"#1C1F27"}`}}>
+          {isFromTest && (
+            <div style={{fontSize:11,color:"#00D2FF",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
+              <span style={{fontWeight:700}}>⚡ Basé sur ton dernier test Évaluation VMA</span><br/>
+              <span style={{color:"#555"}}>Test du {result.latestTest?.date} · {result.latestTest?.dist}km en {result.latestTest?.dur}min · méthode la plus fiable</span>
+            </div>
+          )}
+          {isFromSeuil && (
+            <div style={{fontSize:11,color:"#FF9F43",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
+              <span style={{fontWeight:700}}>△ Estimé depuis tes séances Seuil</span><br/>
+              <span style={{color:"#555"}}>Pas de test Évaluation VMA · estimation depuis ta meilleure allure Seuil ({result.breakdown?.seuilSessions} séances sur 8 semaines)</span>
+            </div>
+          )}
+          {!result && (
+            <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
+              Aucune donnée. Fais un test Évaluation VMA ou ajoute des séances Seuil pour une estimation.
+            </div>
+          )}
         </div>
 
-        {/* Breakdown rows */}
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          {rows.map(({ type, meta, data }) => {
-            const hasData = !!data;
-
-            return (
-              <div
-                key={type}
-                style={{
-                  background: hasData ? meta.color + "08" : "#080A0E",
-                  border: `1px solid ${hasData ? meta.color + "33" : "#1C1F27"}`,
-                  borderRadius:14,
-                  padding:"16px 18px",
-                  opacity: hasData ? 1 : 0.45,
-                }}
-              >
-                {/* Top row */}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{
-                      width:32,height:32,borderRadius:8,
-                      background: hasData ? meta.color + "20" : "#1C1F27",
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:13,color:meta.color,
-                    }}>
-                      {TYPE_META[type]?.icon}
-                    </div>
-                    <div>
-                      <div style={{fontSize:12,fontWeight:700,color:hasData?meta.color:"#555"}}>{meta.label}</div>
-                      <div style={{fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>{meta.desc}</div>
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    {hasData ? (
-                      <>
-                        <div style={{fontSize:18,fontWeight:800,color:"#E8E4DC"}}>{data.vmaEstimate.toFixed(1)} <span style={{fontSize:11,color:"#555",fontWeight:400}}>km/h</span></div>
-                        <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{data.sessions} séance{data.sessions>1?"s":""}</div>
-                      </>
-                    ) : (
-                      <div style={{fontSize:11,color:"#333",fontFamily:"'JetBrains Mono',monospace"}}>Pas de données</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Stats row */}
-                {hasData && (
-                  <div style={{display:"flex",gap:8,marginBottom:12}}>
-                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>ALLURE CONSTATÉE</div>
-                      <div style={{fontSize:14,fontWeight:700,color:"#E8E4DC"}}>{fmtPaceStr(data.avgPace)}/km</div>
-                    </div>
-                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>RATIO UTILISÉ</div>
-                      <div style={{fontSize:14,fontWeight:700,color:meta.color}}>{data.pct}% VMA</div>
-                    </div>
-                    <div style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
-                      <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:2}}>→ VMA EST.</div>
-                      <div style={{fontSize:14,fontWeight:700,color:meta.color}}>{data.vmaEstimate.toFixed(1)} km/h</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Progress bar */}
+        {isFromTest && result.testHistory?.length > 0 && (
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>HISTORIQUE DES TESTS</div>
+            {result.testHistory.map((t,i)=>(
+              <div key={t.date} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#080A0E",borderRadius:10,border:`1px solid ${i===0?"#00D2FF33":"#1C1F27"}`,marginBottom:6}}>
                 <div>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>
-                    <span>Contribution au calcul</span>
-                    <span style={{color:meta.color}}>poids ×{meta.weight}</span>
-                  </div>
-                  <div style={{height:6,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
-                    {hasData && (
-                      <div
-                        style={{
-                          height:"100%",
-                          width:`${(meta.weight / 4) * 100}%`,
-                          background:`linear-gradient(90deg, ${meta.color}88, ${meta.color})`,
-                          borderRadius:3,
-                          transition:"width 1s ease",
-                        }}
-                      />
-                    )}
-                  </div>
+                  <div style={{fontSize:11,color:i===0?"#00D2FF":"#888",fontFamily:"'JetBrains Mono',monospace"}}>{t.date}{i===0?" · DERNIER":""}</div>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{t.dist}km en {t.dur}min</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:18,fontWeight:800,color:i===0?"#E8E4DC":"#666"}}>{t.vma.toFixed(2)}</div>
+                  <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>km/h</div>
                 </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {/* Formula explication */}
-        <div style={{marginTop:20,padding:"16px",background:"#080A0E",borderRadius:12,border:"1px solid #1C1F27"}}>
-          <div style={{fontSize:9,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>COMMENT C'EST CALCULÉ</div>
+        <div style={{padding:"14px 16px",background:"#080A0E",borderRadius:12,border:"1px solid #1C1F27",marginBottom:16}}>
+          <div style={{fontSize:9,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>COMMENT CALCULER TA VMA</div>
           <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.8}}>
-            Chaque type de séance correspond à un % fixe de ta VMA :<br/>
-            <span style={{color:"#6BF178"}}>EF = 70%</span> · <span style={{color:"#C77DFF"}}>SL = 72%</span> · <span style={{color:"#FF9F43"}}>Seuil = 86%</span> · <span style={{color:"#FF6B6B"}}>VMA = 98%</span><br/><br/>
-            <span style={{color:"#E8E4DC"}}>VMA estimée = allure constatée ÷ ratio</span><br/>
-            La VMA finale = moyenne pondérée (séances VMA = poids ×4, seuil ×3, EF/SL ×2)
+            <span style={{color:"#00D2FF",fontWeight:700}}>✓ Test 6 min (recommandé)</span><br/>
+            Sur piste ou GPS précis, cours à fond 6 minutes, note la distance. Ajoute une séance <span style={{color:"#00D2FF"}}>Évaluation VMA</span> dans le journal avec la distance couverte → calcul automatique.<br/><br/>
+            <span style={{color:"#FF9F43"}}>Fallback : Seuil</span><br/>
+            Sans test, l'app utilise ta meilleure allure Seuil (÷0.87). Moins précis, sensible aux conditions.
           </div>
         </div>
 
-        {/* CTA */}
         {result && Math.abs(+diff) >= 0.2 && (
-          <div style={{
-            marginTop:14,padding:"14px 16px",
-            background: diffPositive ? "#6BF17811" : "#FF9F4311",
-            border: `1px solid ${diffPositive ? "#6BF17833" : "#FF9F4333"}`,
-            borderRadius:12,
-            fontSize:11,color:diffPositive?"#6BF178":"#FF9F43",
-            fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,
-          }}>
+          <div style={{padding:"14px 16px",background:diffPositive?"#6BF17811":"#FF9F4311",border:`1px solid ${diffPositive?"#6BF17833":"#FF9F4333"}`,borderRadius:12,fontSize:11,color:diffPositive?"#6BF178":"#FF9F43",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
             {diffPositive
-              ? `✓ Ta VMA calculée (${finalVMA} km/h) est supérieure à ta config (${currentVMA} km/h). Pense à recalibrer ton plan dans les réglages !`
-              : `△ Ta VMA calculée (${finalVMA} km/h) est inférieure à ta config (${currentVMA} km/h). Tes allures cibles sont peut-être trop ambitieuses.`
+              ? `✓ VMA calculée (${finalVMA} km/h) > config (${currentVMA} km/h). Recalibre dans les réglages !`
+              : `△ VMA calculée (${finalVMA} km/h) < config (${currentVMA} km/h). Allures cibles peut-être trop ambitieuses.`
             }
           </div>
         )}
@@ -1674,9 +1604,8 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                   // Inclure : futures, aujourd'hui, et TOUTES les séances de la semaine courante (même passées)
                   const curWkKey = wkKey(TODAY_STR);
                   const sorted=[...planned].sort((a,b)=>a.date.localeCompare(b.date)).filter(p=>{
-                    if(!isPast(p.date)||isToday(p.date)) return true; // futur ou aujourd'hui
-                    if(wkKey(p.date)===curWkKey) return true; // semaine en cours (passé inclus)
-                    if(done.find(d=>d.plannedId===p.id)) return true; // déjà faite (pour le score)
+                    // Semaine en cours (toute la semaine, passé inclus) + futures uniquement
+                    if(wkKey(p.date) >= curWkKey) return true;
                     return false;
                   });
                   const weeks={};
