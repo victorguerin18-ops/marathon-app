@@ -984,7 +984,16 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
 
   const curWeek  = weeklyVol[0]||{dist:0,load:0};
   const prevWeek = weeklyVol[1]||{dist:0,load:0};
-  const acwr     = prevWeek.load?(curWeek.load/prevWeek.load):1;
+  // ACWR unifié : charge aiguë (7j) / charge chronique (moyenne 4×7j) — même calcul que protection score
+  const acuteLoadMain = done
+    .filter(r => r.date >= addDays(TODAY_STR, -7))
+    .reduce((s, r) => s + r.dist * (r.rpe || 5), 0);
+  const weeks4Main = [0,1,2,3].map(i =>
+    done.filter(r => r.date >= addDays(TODAY_STR, -(i+1)*7) && r.date < addDays(TODAY_STR, -i*7))
+        .reduce((s, r) => s + r.dist * (r.rpe || 5), 0)
+  );
+  const chronicLoadMain = weeks4Main.reduce((s, v) => s + v, 0) / 4;
+  const acwr = chronicLoadMain > 0 ? acuteLoadMain / chronicLoadMain : 1;
   const totalKm  = done.reduce((s,r)=>s+r.dist,0);
   const acwrStatus = acwr>1.3?{label:"RISQUE ÉLEVÉ",color:"#FF6B6B"}:acwr>1.15?{label:"CHARGE MODÉRÉE",color:"#FF9F43"}:{label:"OPTIMAL",color:"#4ECDC4"};
 
@@ -1196,7 +1205,7 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
       <style>{css}</style>
 
       {/* TOP */}
-      <div style={{padding:"20px 20px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+      <div style={{padding:`calc(env(safe-area-inset-top, 0px) + 20px) 20px 0`,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{fontSize:11,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>MARATHON DE LILLE</div>
           <div style={{fontSize:28,fontWeight:800,letterSpacing:-1,marginTop:2}}>
@@ -1910,27 +1919,6 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
         {/* ═══ ANALYSE ═══ */}
         {view==="analyse" && (
           <div className="fade-up">
-            <div className="card" style={{padding:22,marginBottom:14,borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27"}}>
-              <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:16}}>CHARGE · ACWR</div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
-                <div>
-                  <div style={{fontSize:42,fontWeight:800,color:acwrStatus.color,lineHeight:1}}>{acwr.toFixed(2)}</div>
-                  <div style={{fontSize:13,color:acwrStatus.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{acwrStatus.label}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>Zone optimale</div>
-                  <div style={{fontSize:13,color:"#4ECDC4",fontFamily:"'JetBrains Mono',monospace"}}>0.80 → 1.30</div>
-                </div>
-              </div>
-              <div style={{height:8,background:"#1C1F27",borderRadius:4,position:"relative"}}>
-                <div style={{position:"absolute",left:"40%",width:"45%",height:8,background:"#4ECDC433",borderRadius:4}}/>
-                <div style={{position:"absolute",left:`${Math.min(acwr/2*100,95)}%`,width:12,height:12,top:-2,borderRadius:"50%",background:acwrStatus.color,transform:"translateX(-50%)",border:"2px solid #080A0E"}}/>
-              </div>
-              <div style={{marginTop:14,padding:"12px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
-                {acwr>1.3?"⚠ Risque de blessure élevé. Réduis la charge de 20-30%.":acwr>1.15?"△ Charge modérée. Surveille ta récupération.":"✓ Tu es dans la zone optimale. Continue !"}
-              </div>
-            </div>
-
             <div className="card" style={{padding:22,marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                 <div>
@@ -1968,6 +1956,42 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                   </div>
                 );
               })()}
+            </div>
+
+            <div className="card" style={{padding:22,marginBottom:14,borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27"}}>
+              <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:16}}>CHARGE · ACWR</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
+                <div>
+                  <div style={{fontSize:42,fontWeight:800,color:acwrStatus.color,lineHeight:1}}>{acwr.toFixed(2)}</div>
+                  <div style={{fontSize:13,color:acwrStatus.color,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{acwrStatus.label}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>Zone optimale · 4 sem. glissantes</div>
+                  <div style={{fontSize:13,color:"#4ECDC4",fontFamily:"'JetBrains Mono',monospace"}}>0.80 → 1.30</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:14}}>
+                {[
+                  ["CHARGE 7J", Math.round(acuteLoadMain), "#E8E4DC"],
+                  ["MOY. 28J",  Math.round(chronicLoadMain), "#888"],
+                  ["RATIO",     acwr.toFixed(2), acwrStatus.color],
+                ].map(([l,v,c])=>(
+                  <div key={l} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                    <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3,letterSpacing:1}}>{l}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{height:8,background:"#1C1F27",borderRadius:4,position:"relative"}}>
+                <div style={{position:"absolute",left:"40%",width:"15%",height:8,background:"#4ECDC433",borderRadius:4}}/>
+                <div style={{position:"absolute",left:`${Math.min(acwr/2*100,95)}%`,width:12,height:12,top:-2,borderRadius:"50%",background:acwrStatus.color,transform:"translateX(-50%)",border:"2px solid #080A0E"}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:4,marginBottom:10}}>
+                <span>0</span><span>0.8</span><span>1.0</span><span>1.3</span><span>1.5</span><span>2.0</span>
+              </div>
+              <div style={{padding:"10px 12px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7}}>
+                {acwr>1.3?"⚠ Risque de blessure élevé. Réduis la charge de 20-30%.":acwr>1.15?"△ Charge modérée. Surveille ta récupération.":"✓ Tu es dans la zone optimale. Continue !"}
+              </div>
             </div>
 
             <div className="card" style={{padding:22,marginBottom:14}}>
