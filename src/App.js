@@ -476,6 +476,7 @@ export default function App() {
   const [moveDate, setMoveDate] = useState("");
 
   const [showProtectionDetail, setShowProtectionDetail] = useState(false);
+  const [showACWRDetail, setShowACWRDetail] = useState(false);
 
   // Modal débrief post-Strava
   const [stravaDebriefModal, setStravaDebriefModal] = useState(null); // {stravaSession, plannedSession}
@@ -1689,7 +1690,14 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                     const totalMin=sessions.reduce((s,p)=>s+(p.targetDur||0),0);
                     const totalH=Math.floor(totalMin/60);
                     const totalM=totalMin%60;
-                    const doneCount=sessions.filter(p=>done.find(d=>d.plannedId===p.id)).length;
+                    const doneCount=sessions.filter(p=>
+                      done.find(d=>d.plannedId===p.id) ||
+                      done.find(d=>d.date===p.date && d.fromStrava && !d.plannedId)
+                    ).length;
+                    const doneKm=sessions.reduce((s,p)=>{
+                      const linked=done.find(d=>d.plannedId===p.id)||done.find(d=>d.date===p.date&&d.fromStrava&&!d.plannedId);
+                      return s+(linked?linked.dist:0);
+                    },0);
                     const maxKm=80; // référence barre = 80km
                     const barPct=Math.min((totalKm/maxKm)*100,100);
                     const wkDate=new Date(wk+"T00:00:00");
@@ -1705,11 +1713,14 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                               {isCurrentWk?"▶ SEMAINE EN COURS":wkLabel}
                             </span>
                             <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:"#888"}}>
-                              <span style={{color:"#E8E4DC",fontWeight:700}}>{totalKm.toFixed(0)} km</span>
+                              {doneKm>0
+                                ? <><span style={{color:"#4ECDC4",fontWeight:700}}>{doneKm.toFixed(0)}</span><span style={{color:"#555"}}>/{totalKm.toFixed(0)} km</span></>
+                                : <span style={{color:"#E8E4DC",fontWeight:700}}>{totalKm.toFixed(0)} km</span>
+                              }
                               <span style={{color:"#555",margin:"0 4px"}}>·</span>
                               <span style={{color:"#888"}}>{totalH>0?`${totalH}h${String(totalM).padStart(2,"0")}`:`${totalMin}min`}</span>
                               <span style={{color:"#555",margin:"0 4px"}}>·</span>
-                              <span style={{color:doneCount===sessions.length&&sessions.length>0?"#4ECDC4":"#555"}}>{doneCount}/{sessions.length}</span>
+                              <span style={{color:doneCount===sessions.length&&sessions.length>0?"#4ECDC4":doneCount>0?"#FFE66D":"#555"}}>{doneCount}/{sessions.length}</span>
                             </span>
                           </div>
                           {/* Barre volume */}
@@ -1956,8 +1967,11 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
               })()}
             </div>
 
-            <div className="card" style={{padding:22,marginBottom:14,borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27"}}>
-              <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:16}}>CHARGE · ACWR</div>
+            <div className="card" onClick={()=>setShowACWRDetail(true)} style={{padding:22,marginBottom:14,borderColor:acwr>1.3?"#FF6B6B44":"#1C1F27",cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div style={{fontSize:10,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>CHARGE · ACWR</div>
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>Détail →</div>
+              </div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
                 <div>
                   <div style={{fontSize:42,fontWeight:800,color:acwrStatus.color,lineHeight:1}}>{acwr.toFixed(2)}</div>
@@ -2523,6 +2537,104 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                 </div>
               </div>
 
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── MODAL ACWR DÉTAIL ── */}
+      {showACWRDetail && (()=>{
+        // Calcul des 4 semaines individuelles
+        const weeks4Detail = [0,1,2,3].map(i => {
+          const runs = done.filter(r =>
+            r.date >= addDays(TODAY_STR, -(i+1)*7) &&
+            r.date < addDays(TODAY_STR, -i*7)
+          );
+          const load = runs.reduce((s,r) => s + r.dist*(r.rpe||5), 0);
+          const dist = runs.reduce((s,r) => s + r.dist, 0);
+          const wkStart = addDays(TODAY_STR, -(i+1)*7);
+          const [,mm,dd] = wkStart.split('-');
+          return { label: `S-${i+1} (${parseInt(dd)}/${parseInt(mm)})`, load: Math.round(load), dist: Math.round(dist*10)/10, runs: runs.length, isCurrent: i===0 };
+        });
+        const maxLoad = Math.max(...weeks4Detail.map(w=>w.load), 1);
+
+        return (
+          <div onClick={()=>setShowACWRDetail(false)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{width:"100%",maxWidth:480,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))",maxHeight:"85vh",overflowY:"auto"}}>
+
+              {/* Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+                <div>
+                  <div style={{fontSize:10,color:acwrStatus.color,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>CHARGE AIGUË / CHRONIQUE</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                    <span style={{fontSize:48,fontWeight:800,color:acwrStatus.color,letterSpacing:-3,lineHeight:1}}>{acwr.toFixed(2)}</span>
+                    <span style={{fontSize:14,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{acwrStatus.label}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>Zone optimale : 0.80 → 1.30</div>
+                </div>
+                <button onClick={()=>setShowACWRDetail(false)}
+                  style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              </div>
+
+              {/* Jauge ACWR */}
+              <div style={{marginBottom:24}}>
+                <div style={{height:10,background:"#1C1F27",borderRadius:5,position:"relative",marginBottom:6}}>
+                  <div style={{position:"absolute",left:"40%",width:"15%",height:"100%",background:"#4ECDC433",borderRadius:3}}/>
+                  <div style={{position:"absolute",top:-3,left:`${Math.min(acwr/2*100,95)}%`,width:16,height:16,borderRadius:"50%",background:acwrStatus.color,border:"2px solid #080A0E",transform:"translateX(-50%)",boxShadow:`0 0 8px ${acwrStatus.color}66`}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace"}}>
+                  <span>0</span><span style={{color:"#4ECDC4"}}>0.8</span><span style={{color:"#4ECDC4"}}>1.3</span><span>1.5</span><span>2.0</span>
+                </div>
+              </div>
+
+              {/* Résumé 3 stats */}
+              <div style={{display:"flex",gap:8,marginBottom:24}}>
+                {[
+                  ["CHARGE AIGUË (7j)", Math.round(acuteLoadMain), "#E8E4DC", "km×RPE cette semaine"],
+                  ["CHARGE CHRONIQUE", Math.round(chronicLoadMain), "#888", "moyenne 4 semaines"],
+                  ["RATIO ACWR", acwr.toFixed(2), acwrStatus.color, "aiguë ÷ chronique"],
+                ].map(([l,v,c,sub])=>(
+                  <div key={l} style={{flex:1,background:"#080A0E",borderRadius:10,padding:"12px 8px",textAlign:"center",border:`1px solid ${c}22`}}>
+                    <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:6,letterSpacing:1,lineHeight:1.4}}>{l}</div>
+                    <div style={{fontSize:18,fontWeight:800,color:c,marginBottom:4}}>{v}</div>
+                    <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>{sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Détail 4 semaines */}
+              <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:12}}>DÉTAIL PAR SEMAINE</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+                {weeks4Detail.map((w,i)=>(
+                  <div key={i} style={{background:"#080A0E",borderRadius:10,padding:"12px 14px",border:`1px solid ${w.isCurrent?"#FFE66D33":"#1C1F27"}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:w.isCurrent?"#FFE66D":"#888"}}>{w.label}</span>
+                        {w.isCurrent && <span style={{fontSize:9,color:"#FFE66D",border:"1px solid #FFE66D44",borderRadius:4,padding:"1px 5px",fontFamily:"'JetBrains Mono',monospace"}}>EN COURS</span>}
+                      </div>
+                      <span style={{fontSize:13,fontWeight:700,color:w.isCurrent?"#FFE66D":"#aaa",fontFamily:"'JetBrains Mono',monospace"}}>charge {w.load}</span>
+                    </div>
+                    <div style={{display:"flex",gap:12,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>
+                      <span>{w.dist} km</span>
+                      <span>·</span>
+                      <span>{w.runs} séance{w.runs>1?"s":""}</span>
+                    </div>
+                    {/* Barre charge relative */}
+                    <div style={{height:4,background:"#1C1F27",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${(w.load/maxLoad)*100}%`,background:w.isCurrent?`linear-gradient(90deg,${acwrStatus.color}88,${acwrStatus.color})`:"#444",borderRadius:2,transition:"width 0.8s ease"}}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Explication */}
+              <div style={{padding:"14px 16px",background:"#080A0E",borderRadius:12,border:"1px solid #1C1F27",fontSize:11,color:"#666",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.8}}>
+                <span style={{color:"#E8E4DC"}}>Charge = km × RPE</span> pour chaque séance.<br/>
+                <span style={{color:"#E8E4DC"}}>ACWR = charge 7j ÷ moyenne des 4 semaines.</span><br/>
+                Zone verte 0.8–1.3 : tu charges suffisamment sans risquer la surcharge. En dessous de 0.8, tu es sous-entraîné. Au-dessus de 1.5, risque de blessure élevé.
+              </div>
             </div>
           </div>
         );
