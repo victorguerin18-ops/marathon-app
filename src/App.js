@@ -475,6 +475,8 @@ export default function App() {
   const [moveTargetId, setMoveTargetId] = useState(null);
   const [moveDate, setMoveDate] = useState("");
 
+  const [showProtectionDetail, setShowProtectionDetail] = useState(false);
+
   // Modal débrief post-Strava
   const [stravaDebriefModal, setStravaDebriefModal] = useState(null); // {stravaSession, plannedSession}
   const [debriefForm, setDebriefForm] = useState({rpe:"6", feeling:"3", notes:""});
@@ -1545,7 +1547,7 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
             )}
 
             {/* ── PROTECTION SCORE ── */}
-            <div className="card" style={{padding:20,marginTop:14,border:`1px solid ${protectionScore.level.color}33`,background:`${protectionScore.level.bg}`}}>
+            <div className="card" onClick={()=>setShowProtectionDetail(true)} style={{padding:20,marginTop:14,border:`1px solid ${protectionScore.level.color}33`,background:`${protectionScore.level.bg}`,cursor:"pointer"}}>
               {/* Header */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                 <div>
@@ -1553,6 +1555,7 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                     {protectionScore.level.icon} PROTECTION BLESSURE
                   </div>
                   <div style={{fontSize:22,fontWeight:800,color:protectionScore.level.color}}>{protectionScore.level.label}</div>
+                  <div style={{fontSize:10,color:protectionScore.level.color+"88",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>Appuyer pour le détail →</div>
                 </div>
                 <div style={{textAlign:"center"}}>
                   <div style={{fontSize:44,fontWeight:800,color:protectionScore.level.color,lineHeight:1,letterSpacing:-2}}>{protectionScore.total}</div>
@@ -2287,6 +2290,217 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                   {mode==="swap"?"⇄ ÉCHANGER":"→ REPORTER"}
                 </button>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── MODAL PROTECTION BLESSURE ── */}
+      {showProtectionDetail && (()=>{
+        const ps = protectionScore;
+
+        // Données brutes pour chaque signal
+        const acwrSig  = ps.signals.find(s=>s.key==="ACWR");
+        const volSig   = ps.signals.find(s=>s.key==="VOL");
+        const monoSig  = ps.signals.find(s=>s.key==="MONO");
+        const readySig = ps.signals.find(s=>s.key==="READY");
+
+        // Calcul ACWR brut pour jauge
+        const acwrRaw = parseFloat(acwrSig?.value) || 1;
+
+        // Séances 7 derniers jours pour monotonie
+        const last7Runs = done.filter(r => r.date >= addDays(TODAY_STR, -7));
+        const last7ByType = {};
+        last7Runs.forEach(r => { if(!last7ByType[r.type]) last7ByType[r.type]={runs:0,km:0}; last7ByType[r.type].runs++; last7ByType[r.type].km+=r.dist; });
+
+        // Vol semaine courante vs précédente
+        const curKmRaw  = weeklyVol[0]?.dist || 0;
+        const prevKmRaw = weeklyVol[1]?.dist || 0;
+
+        function SigColor(score) { return score>=75?"#4ECDC4":score>=50?"#FF9F43":"#FF6B6B"; }
+
+        return (
+          <div onClick={()=>setShowProtectionDetail(false)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{width:"100%",maxWidth:480,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))",maxHeight:"90vh",overflowY:"auto"}}>
+
+              {/* Header modal */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+                <div>
+                  <div style={{fontSize:10,color:ps.level.color,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>{ps.level.icon} PROTECTION BLESSURE</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                    <span style={{fontSize:48,fontWeight:800,color:ps.level.color,letterSpacing:-3,lineHeight:1}}>{ps.total}</span>
+                    <span style={{fontSize:14,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>/100 · {ps.level.label}</span>
+                  </div>
+                </div>
+                <button onClick={()=>setShowProtectionDetail(false)}
+                  style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              </div>
+
+              {/* Barre globale */}
+              <div style={{height:8,background:"#1C1F27",borderRadius:4,marginBottom:28,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${ps.total}%`,background:`linear-gradient(90deg,${ps.level.color}66,${ps.level.color})`,borderRadius:4,transition:"width 1s ease"}}/>
+              </div>
+
+              {/* ── 1. READINESS (45%) ── */}
+              <div style={{marginBottom:24,padding:"18px",background:SigColor(readySig?.score||0)+"0A",border:`1px solid ${SigColor(readySig?.score||0)}22`,borderRadius:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:SigColor(readySig?.score||0),letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>READINESS · POIDS 45%</div>
+                    <div style={{fontSize:16,fontWeight:800,color:SigColor(readySig?.score||0)}}>{readySig?.value||"—"}</div>
+                  </div>
+                  <div style={{fontSize:36,fontWeight:800,color:SigColor(readySig?.score||0),letterSpacing:-2}}>{readySig?.score||0}</div>
+                </div>
+                {/* Jauge VFC + récup */}
+                {checkInSaved ? (
+                  <div style={{display:"flex",gap:8,marginBottom:10}}>
+                    {[
+                      {label:"VFC",value:checkIn.hrv?`${checkIn.hrv}ms`:"—",target:"≥78ms",ok:(parseFloat(checkIn.hrv)||0)>=78},
+                      {label:"RÉCUP.",value:checkIn.recovery?`${checkIn.recovery}%`:"—",target:"≥70%",ok:(parseFloat(checkIn.recovery)||0)>=70},
+                      {label:"SENSATION",value:checkIn.feeling===0?"🟢 Frais":checkIn.feeling===1?"🟡 Correct":"🔴 Fatigué",target:"Frais",ok:checkIn.feeling===0},
+                    ].map(({label,value,target,ok})=>(
+                      <div key={label} style={{flex:1,background:"#080A0E",borderRadius:10,padding:"10px 8px",textAlign:"center",border:`1px solid ${ok?"#4ECDC433":"#FF6B6B33"}`}}>
+                        <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:4,letterSpacing:1}}>{label}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:ok?"#4ECDC4":"#FF9F43"}}>{value}</div>
+                        <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>cible {target}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{padding:"10px 12px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>
+                    💡 Fais ton check-in matin pour avoir des données précises
+                  </div>
+                )}
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
+                  Le signal le plus important — ta VFC reflète la capacité de ton système nerveux à encaisser une charge. En dessous de 70ms ou récup &lt;60%, le risque de blessure augmente significativement.
+                </div>
+              </div>
+
+              {/* ── 2. ACWR (35%) ── */}
+              <div style={{marginBottom:24,padding:"18px",background:SigColor(acwrSig?.score||0)+"0A",border:`1px solid ${SigColor(acwrSig?.score||0)}22`,borderRadius:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:SigColor(acwrSig?.score||0),letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>CHARGE AIGUË/CHRONIQUE · 35%</div>
+                    <div style={{fontSize:16,fontWeight:800,color:SigColor(acwrSig?.score||0)}}>ACWR {acwrSig?.value||"—"}</div>
+                  </div>
+                  <div style={{fontSize:36,fontWeight:800,color:SigColor(acwrSig?.score||0),letterSpacing:-2}}>{acwrSig?.score||0}</div>
+                </div>
+                {/* Jauge ACWR */}
+                <div style={{marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>
+                    <span>Sous-chargé</span><span style={{color:"#4ECDC4"}}>Zone optimale</span><span>Surcharge</span>
+                  </div>
+                  <div style={{height:10,background:"#1C1F27",borderRadius:5,position:"relative",overflow:"visible"}}>
+                    {/* Zone optimale 0.8-1.3 en vert */}
+                    <div style={{position:"absolute",left:"26.7%",width:"16.7%",height:"100%",background:"#4ECDC422",borderRadius:2}}/>
+                    {/* Curseur */}
+                    <div style={{position:"absolute",top:-3,left:`${Math.min(Math.max(acwrRaw/2,0),1)*95}%`,width:16,height:16,borderRadius:"50%",background:SigColor(acwrSig?.score||0),border:"2px solid #080A0E",transform:"translateX(-50%)",transition:"left 0.8s ease",boxShadow:`0 0 8px ${SigColor(acwrSig?.score||0)}66`}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>
+                    <span>0</span><span>0.8</span><span>1.0</span><span>1.3</span><span>1.5</span><span>2.0</span>
+                  </div>
+                </div>
+                {/* Charge aiguë vs chronique */}
+                <div style={{display:"flex",gap:8,marginBottom:10}}>
+                  {[
+                    {label:"CHARGE 7J",value:Math.round(weeklyVol[0]?.load||0),color:"#E8E4DC"},
+                    {label:"MOY. 28J",value:Math.round(weeklyVol.slice(0,4).reduce((s,w)=>s+(w?.load||0),0)/4),color:"#888"},
+                    {label:"RATIO",value:acwrSig?.value,color:SigColor(acwrSig?.score||0)},
+                  ].map(({label,value,color})=>(
+                    <div key={label} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3,letterSpacing:1}}>{label}</div>
+                      <div style={{fontSize:13,fontWeight:700,color}}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
+                  Compare ta charge des 7 derniers jours à ta moyenne sur 4 semaines. Zone optimale : 0.8–1.3. Au-delà de 1.5, le risque de blessure augmente exponentiellement.
+                </div>
+              </div>
+
+              {/* ── 3. MONOTONIE (10%) ── */}
+              <div style={{marginBottom:24,padding:"18px",background:SigColor(monoSig?.score||0)+"0A",border:`1px solid ${SigColor(monoSig?.score||0)}22`,borderRadius:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:SigColor(monoSig?.score||0),letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>MONOTONIE · 10%</div>
+                    <div style={{fontSize:16,fontWeight:800,color:SigColor(monoSig?.score||0)}}>{monoSig?.value||"—"}</div>
+                  </div>
+                  <div style={{fontSize:36,fontWeight:800,color:SigColor(monoSig?.score||0),letterSpacing:-2}}>{monoSig?.score||0}</div>
+                </div>
+                {/* Types des 7 derniers jours */}
+                {last7Runs.length > 0 ? (
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:6,letterSpacing:1}}>SÉANCES 7 DERNIERS JOURS</div>
+                    {Object.entries(last7ByType).map(([type,data])=>{
+                      const tm={
+                        "Endurance fondamentale":{color:"#6BF178",icon:"◈"},
+                        "Fractionné / VMA":{color:"#FF6B6B",icon:"▲▲"},
+                        "Tempo / Seuil":{color:"#FF9F43",icon:"◇"},
+                        "Sortie longue":{color:"#C77DFF",icon:"◈◈◈"},
+                        "Footing":{color:"#A8DADC",icon:"〜"},
+                      }[type]||{color:"#888",icon:"○"};
+                      return (
+                        <div key={type} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"#080A0E",borderRadius:8,marginBottom:4,borderLeft:`3px solid ${tm.color}`}}>
+                          <span style={{fontSize:11,color:tm.color,fontFamily:"'JetBrains Mono',monospace"}}>{tm.icon} {type}</span>
+                          <span style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{data.runs} × {data.km.toFixed(1)}km</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{padding:"10px",background:"#080A0E",borderRadius:8,fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>
+                    Pas assez de données (7 derniers jours)
+                  </div>
+                )}
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
+                  Trop de séances au même RPE ou même type = risque de surcharge tissulaire. Varie intensité et types pour garder la monotonie basse.
+                </div>
+              </div>
+
+              {/* ── 4. PROGRESSION VOLUME (10%) ── */}
+              <div style={{marginBottom:16,padding:"18px",background:SigColor(volSig?.score||0)+"0A",border:`1px solid ${SigColor(volSig?.score||0)}22`,borderRadius:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:SigColor(volSig?.score||0),letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>PROGRESSION VOLUME · 10%</div>
+                    <div style={{fontSize:16,fontWeight:800,color:SigColor(volSig?.score||0)}}>{volSig?.value||"0%"}</div>
+                  </div>
+                  <div style={{fontSize:36,fontWeight:800,color:SigColor(volSig?.score||0),letterSpacing:-2}}>{volSig?.score||0}</div>
+                </div>
+                {/* Semaine courante vs précédente */}
+                <div style={{display:"flex",gap:8,marginBottom:10}}>
+                  {[
+                    {label:"SEMAINE PREC.",value:`${prevKmRaw.toFixed(1)} km`,color:"#888"},
+                    {label:"CETTE SEMAINE",value:`${curKmRaw.toFixed(1)} km`,color:"#E8E4DC"},
+                    {label:"ÉVOLUTION",value:volSig?.value||"0%",color:SigColor(volSig?.score||0)},
+                  ].map(({label,value,color})=>(
+                    <div key={label} style={{flex:1,background:"#080A0E",borderRadius:8,padding:"8px 6px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3,letterSpacing:1}}>{label}</div>
+                      <div style={{fontSize:13,fontWeight:700,color}}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Barres comparatives */}
+                <div style={{marginBottom:10}}>
+                  {[[prevKmRaw,"S-1","#555"],[curKmRaw,"Cette sem.",SigColor(volSig?.score||0)]].map(([km,label,color])=>{
+                    const max=Math.max(prevKmRaw,curKmRaw,1);
+                    return (
+                      <div key={label} style={{marginBottom:6}}>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>
+                          <span>{label}</span><span style={{color}}>{km.toFixed(1)} km</span>
+                        </div>
+                        <div style={{height:5,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${(km/max)*100}%`,background:color,borderRadius:3,transition:"width 0.8s ease"}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>
+                  Règle des 10% : ne pas augmenter le volume de plus de 10% par semaine. Au-delà de +20%, le risque de blessure augmente fortement.
+                </div>
+              </div>
+
             </div>
           </div>
         );
