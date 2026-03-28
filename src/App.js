@@ -982,8 +982,6 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
       .map(([wk,d])=>({wk,...d,load:d.dist*(d.rpe.reduce((s,v)=>s+v,0)/d.rpe.length)}));
   },[done]);
 
-  const curWeek  = weeklyVol[0]||{dist:0,load:0};
-  const prevWeek = weeklyVol[1]||{dist:0,load:0};
   // ACWR unifié : charge aiguë (7j) / charge chronique (moyenne 4×7j) — même calcul que protection score
   const acuteLoadMain = done
     .filter(r => r.date >= addDays(TODAY_STR, -7))
