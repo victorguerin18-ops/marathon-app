@@ -346,8 +346,8 @@ export function generatePlanFromConfig(config, existingPlanned=[]) {
 
     // Distribution du volume selon les types (% du volume hebo)
     // SL ~28%, EF×2 ~50%, VMA/Seuil ~22%
-    const slTargetDist   = baseVol * 0.28 * progConf.slMult;
-    const efTargetDist   = baseVol * 0.25; // par séance EF (×2 = 50%)
+    const slTargetDist   = baseVol * 0.30 * progConf.slMult; // SL = 30% volume
+    const efTargetDist   = baseVol * 0.25; // EF = 25% par séance (×2 = 50%)
     // qualTargetDist retiré (non utilisé)
 
     const activeTpl = (weekNum % 2 === 0) ? weekTemplate : (weekTemplateB || weekTemplate);
@@ -549,7 +549,7 @@ export function PlanWizard({ onComplete, onCancel, initialConfig, vma }) {
         dur:tempoEx.calcDur(cfg.paces.tempo,cfg.paces.ef),
         notes:tempoEx.buildNotes(fmtPace(cfg.paces.tempo),fmtPace(cfg.paces.ef)),
       },
-      "Sortie longue":{dist:Math.round(cfg.targetWeeklyKm*0.28),dur:Math.round(cfg.targetWeeklyKm*0.28*cfg.paces.sl),notes:`${fmtPace(cfg.paces.sl)}/km · Zone 2`},
+      "Sortie longue":{dist:Math.round(cfg.targetWeeklyKm*0.30),dur:Math.round(cfg.targetWeeklyKm*0.28*cfg.paces.sl),notes:`${fmtPace(cfg.paces.sl)}/km · Zone 2`},
       "Footing":{dist:6,dur:Math.round(6*cfg.paces.ef+5),notes:"Récupération légère"},
     };
     return ["A","B"].map(week=>{
@@ -1007,7 +1007,7 @@ export function PlanSettings({ config, onUpdate, onRegenerate, onOpenWizard, isR
         <button onClick={()=>onUpdate({targetWeeklyKm:Math.min(80,targetWeeklyKm+2)})} style={{border:"2px solid #1C1F27",background:"transparent",color:"#555",borderRadius:8,width:36,height:36,fontSize:16,cursor:"pointer"}}>+</button>
       </div>
       <div style={{fontSize:10,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:20}}>
-        SL cible : ~{Math.round(targetWeeklyKm*0.28)}km · EF : ~{Math.round(targetWeeklyKm*0.25)}km/séance
+        SL cible : ~{Math.round(targetWeeklyKm*0.30)}km · EF : ~{Math.round(targetWeeklyKm*0.25)}km/séance
       </div>
 
       {/* Progression */}

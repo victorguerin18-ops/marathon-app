@@ -398,6 +398,8 @@ export default function App() {
   const [moveDate, setMoveDate] = useState("");
 
   const [showProtectionDetail, setShowProtectionDetail] = useState(false);
+  const [weekAdjustModal, setWeekAdjustModal] = useState(null); // {session, newDist, reason, isAlert}
+  const [weekAdjustDismissed, setWeekAdjustDismissed] = useState(()=>STORE.get('week_adjust_'+wkKey(new Date().toISOString().split('T')[0]), false));
   const [showACWRDetail, setShowACWRDetail] = useState(false);
 
   // Modal débrief post-Strava
@@ -801,6 +803,24 @@ ${planUpcoming.map(p=>`${p.date}: ${p.type} ${p.targetDist}km`).join('\n')}`;
     }
   }
 
+  async function applyWeekAdjustments(sessions) {
+    // Applique les ajustements adaptatifs aux séances restantes
+    for (const s of sessions) {
+      if (!s.needsAdjust) continue;
+      const newDur = Math.round(s.idealDist * (
+        s.type === "Sortie longue" ? planConfig.paces.sl :
+        s.type === "Endurance fondamentale" ? planConfig.paces.ef :
+        planConfig.paces.tempo
+      ));
+      const updated = { ...s, targetDist: s.idealDist, targetDur: newDur };
+      await savePlanned(updated);
+      setPlanned(prev => prev.map(p => p.id === updated.id ? updated : p));
+    }
+    STORE.set('week_adjust_' + wkKey(TODAY_STR), true);
+    setWeekAdjustDismissed(true);
+    setWeekAdjustModal(null);
+  }
+
   async function applyMove() {
     if (!moveModal) return;
     const { session, mode } = moveModal;
@@ -1063,8 +1083,84 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
     const plannedKm=wkPlanned.reduce((s,p)=>s+p.targetDist,0);
     const doneKm=wkDone.reduce((s,d)=>s+d.dist,0);
     const completion=plannedKm>0?Math.round(doneKm/plannedKm*100):null;
-    return {planned:wkPlanned,done:wkDone,plannedKm,doneKm,completion};
-  },[planned,done]);
+
+    // ── Calcul adaptatif ──────────────────────────────────────────────
+    const targetKm = planConfig.targetWeeklyKm || 42;
+    const remainingKm = Math.max(0, targetKm - doneKm);
+
+    // Séances restantes (non faites, futures ou aujourd'hui)
+    const remaining = wkPlanned.filter(p => {
+      const linked = wkDone.find(d => d.plannedId === p.id || (d.date === p.date && d.fromStrava));
+      return !linked && p.date >= TODAY_STR;
+    }).sort((a,b) => a.date.localeCompare(b.date));
+
+    // Classer les séances restantes par type
+    const QUALITY_TYPES = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
+    const SL_TYPE = "Sortie longue";
+
+    // Km de qualité déjà faits + restants prévus
+    const doneQualKm = wkDone
+      .filter(d => QUALITY_TYPES.includes(d.type))
+      .reduce((s,d) => s+d.dist, 0);
+    const plannedQualKm = remaining
+      .filter(p => QUALITY_TYPES.includes(p.type))
+      .reduce((s,p) => s+p.targetDist, 0);
+    const totalQualKm = doneQualKm + plannedQualKm;
+
+    // Ratio qualité cible : max 25% du volume total
+    const maxQualRatio = 0.20; // max 20% qualité
+    const qualBudget = Math.min(totalQualKm, targetKm * maxQualRatio);
+
+    // Volume EF+Footing restant budgété
+    const easyBudget = remainingKm - Math.max(0, qualBudget - doneQualKm);
+
+    // Calcul distance idéale pour chaque séance restante
+    const adaptedSessions = remaining.map(p => {
+      const isSL = p.type === SL_TYPE;
+      const isQual = QUALITY_TYPES.includes(p.type);
+      const isEF = !isSL && !isQual;
+
+      // Nombre de séances EF restantes
+      const nEFRemaining = remaining.filter(s => !QUALITY_TYPES.includes(s.type) && s.type !== SL_TYPE).length;
+      const nSLRemaining = remaining.filter(s => s.type === SL_TYPE).length;
+
+      let idealDist = p.targetDist;
+
+      if (isSL && nSLRemaining > 0) {
+        // SL = 30% du volume total cible
+        const slTarget = targetKm * 0.30;
+        idealDist = Math.round(slTarget * 10) / 10;
+      } else if (isEF && nEFRemaining > 0) {
+        // EF = volume restant (hors qualité et SL) / nb séances EF restantes
+        const slRemKm = remaining.filter(s=>s.type===SL_TYPE).reduce((s,p)=>s+p.targetDist*0.30/0.28,0);
+        const efBudget = remainingKm - Math.max(0, qualBudget - doneQualKm) - (nSLRemaining * targetKm * 0.30);
+        idealDist = Math.max(4, Math.round((efBudget / nEFRemaining) * 10) / 10);
+      } else if (isQual) {
+        idealDist = p.targetDist; // Qualité on ne touche pas (déjà calculée par le générateur)
+      }
+
+      const delta = idealDist - p.targetDist;
+      const deltaPct = p.targetDist > 0 ? (delta / p.targetDist) * 100 : 0;
+      const isAlert = Math.abs(deltaPct) >= 20;
+      const needsAdjust = Math.abs(delta) >= 0.5;
+
+      return { ...p, idealDist, delta, deltaPct, isAlert, needsAdjust };
+    });
+
+    // Y a-t-il des ajustements significatifs ?
+    const hasAdjustments = adaptedSessions.some(s => s.needsAdjust);
+    const hasAlerts = adaptedSessions.some(s => s.isAlert);
+
+    // Ratio qualité actuel
+    const qualRatio = targetKm > 0 ? Math.round((totalQualKm / targetKm) * 100) : 0;
+
+    return {
+      planned:wkPlanned, done:wkDone, plannedKm, doneKm, completion,
+      // Adaptatif
+      targetKm, remainingKm, adaptedSessions,
+      hasAdjustments, hasAlerts, qualRatio,
+    };
+  },[planned,done,planConfig]);
 
   // VMA calculée pour le badge header
   const computedVMA = useMemo(() => computeVMA(done), [done]);
@@ -1476,6 +1572,55 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
               </div>
             )}
 
+            {/* ── SEMAINE ADAPTIVE ── */}
+            {weekCompare.hasAdjustments && !weekAdjustDismissed && (
+              <div className="card" style={{padding:18,marginTop:14,border:`1px solid ${weekCompare.hasAlerts?"#FF9F4344":"#00D2FF33"}`,background:weekCompare.hasAlerts?"#2b1a00":"#001a24"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:10,color:weekCompare.hasAlerts?"#FF9F43":"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>
+                      {weekCompare.hasAlerts?"⚠ AJUSTEMENT SEMAINE":"◎ AJUSTEMENT SEMAINE"}
+                    </div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#E8E4DC"}}>
+                      {weekCompare.doneKm.toFixed(1)}km faits · objectif {weekCompare.targetKm}km
+                    </div>
+                    <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+                      {weekCompare.remainingKm.toFixed(1)}km restants à répartir · qualité {weekCompare.qualRatio}% de la semaine
+                    </div>
+                  </div>
+                </div>
+                {/* Liste des ajustements */}
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                  {weekCompare.adaptedSessions.filter(s=>s.needsAdjust).map(s=>{
+                    const color = s.isAlert?"#FF9F43":"#00D2FF";
+                    return (
+                      <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"#080A0E",borderRadius:8,border:`1px solid ${color}22`}}>
+                        <div>
+                          <div style={{fontSize:11,color:"#E8E4DC",fontFamily:"'JetBrains Mono',monospace"}}>{s.type.split(' ')[0]} · {s.date}</div>
+                          <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+                            prévu {s.targetDist}km → idéal {s.idealDist}km
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:13,fontWeight:700,color}}>{s.delta>0?"+":""}{s.delta.toFixed(1)}km</div>
+                          {s.isAlert&&<div style={{fontSize:9,color:"#FF9F43",fontFamily:"'JetBrains Mono',monospace"}}>⚠ +{Math.round(s.deltaPct)}%</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setWeekAdjustModal({sessions:weekCompare.adaptedSessions.filter(s=>s.needsAdjust)})}
+                    style={{flex:2,background:weekCompare.hasAlerts?"#FF9F43":"#00D2FF",color:"#080A0E",border:"none",borderRadius:10,padding:"10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                    APPLIQUER LES AJUSTEMENTS
+                  </button>
+                  <button onClick={()=>{STORE.set('week_adjust_'+wkKey(TODAY_STR),true);setWeekAdjustDismissed(true);}}
+                    style={{flex:1,background:"transparent",border:"1px solid #333",color:"#555",borderRadius:10,padding:"10px",fontSize:11,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                    IGNORER
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ── PROTECTION SCORE ── */}
             <div className="card" onClick={()=>setShowProtectionDetail(true)} style={{padding:20,marginTop:14,border:`1px solid ${protectionScore.level.color}33`,background:`${protectionScore.level.bg}`,cursor:"pointer"}}>
               {/* Header */}
@@ -1683,6 +1828,22 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
                           </>)}
                         </div>
                       </div>
+                      {/* Badge ajustement adaptatif */}
+                      {(()=>{
+                        const adj = weekCompare.adaptedSessions?.find(s=>s.id===p.id&&s.needsAdjust);
+                        if(!adj) return null;
+                        return (
+                          <div style={{marginTop:8,padding:"6px 10px",background:adj.isAlert?"#2b1a00":"#001a24",borderRadius:6,border:`1px solid ${adj.isAlert?"#FF9F4344":"#00D2FF33"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{fontSize:10,color:adj.isAlert?"#FF9F43":"#00D2FF",fontFamily:"'JetBrains Mono',monospace"}}>
+                              {adj.isAlert?"⚠":""} Adaptatif : {adj.delta>0?"+":""}{adj.delta.toFixed(1)}km → {adj.idealDist}km
+                            </span>
+                            <button onClick={e=>{e.stopPropagation();setWeekAdjustModal({sessions:[adj]});}}
+                              style={{fontSize:9,color:adj.isAlert?"#FF9F43":"#00D2FF",background:"transparent",border:`1px solid ${adj.isAlert?"#FF9F4333":"#00D2FF33"}`,borderRadius:4,padding:"2px 6px",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                              APPLIQUER
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {p.notes&&<div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:8,lineHeight:1.5}}>💬 {p.notes}</div>}
                       {linked&&<CompareBar planned={p} done={linked}/>}
                     </div>
@@ -2462,6 +2623,70 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
           </div>
         );
       })()}
+
+      {/* ── MODAL AJUSTEMENT SEMAINE ── */}
+      {weekAdjustModal && (
+        <div onClick={()=>setWeekAdjustModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:480,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:10,color:"#00D2FF",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>◎ AJUSTEMENT ADAPTATIF</div>
+                <div style={{fontSize:18,fontWeight:800}}>Optimiser la semaine</div>
+              </div>
+              <button onClick={()=>setWeekAdjustModal(null)} style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+
+            <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.7,marginBottom:16,padding:"10px 14px",background:"#080A0E",borderRadius:8}}>
+              Objectif semaine : <span style={{color:"#E8E4DC"}}>{weekCompare.targetKm}km</span> · Déjà fait : <span style={{color:"#4ECDC4"}}>{weekCompare.doneKm.toFixed(1)}km</span> · Qualité : <span style={{color:"#FF9F43"}}>{weekCompare.qualRatio}%</span> du volume
+            </div>
+
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+              {weekAdjustModal.sessions.map(s=>{
+                const color = s.isAlert?"#FF9F43":"#00D2FF";
+                const typeMeta = {"Sortie longue":"◈◈◈","Endurance fondamentale":"◈","Fractionné / VMA":"▲▲","Tempo / Seuil":"◇","Footing":"〜"};
+                return (
+                  <div key={s.id} style={{padding:"14px",background:"#080A0E",borderRadius:12,border:`1px solid ${color}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <span style={{fontSize:12,fontWeight:700,color}}>{typeMeta[s.type]||"○"} {s.type}</span>
+                      <span style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{s.date}</span>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      {[["PRÉVU",`${s.targetDist}km`,"#555"],["IDÉAL",`${s.idealDist}km`,color],["ÉCART",`${s.delta>0?"+":""}${s.delta.toFixed(1)}km`,color]].map(([l,v,c])=>(
+                        <div key={l} style={{flex:1,background:"#0F1117",borderRadius:8,padding:"8px",textAlign:"center"}}>
+                          <div style={{fontSize:8,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{l}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {s.isAlert&&(
+                      <div style={{marginTop:8,fontSize:10,color:"#FF9F43",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.5}}>
+                        ⚠ Augmentation de +{Math.round(s.deltaPct)}% — surveille ta récupération après cette séance.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{
+                // "Max possible" = appliquer mais plafonner à +20% si alerte
+                const capped = weekAdjustModal.sessions.map(s=>({
+                  ...s,
+                  idealDist: s.isAlert ? Math.round(s.targetDist*1.20*10)/10 : s.idealDist,
+                }));
+                applyWeekAdjustments(capped);
+              }} style={{flex:1,background:"#1C1F27",color:"#888",border:"none",borderRadius:12,padding:14,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                MAX SAFE<br/><span style={{fontWeight:400,fontSize:9}}>plafonné +20%</span>
+              </button>
+              <button onClick={()=>applyWeekAdjustments(weekAdjustModal.sessions)}
+                style={{flex:2,background:"#00D2FF",color:"#080A0E",border:"none",borderRadius:12,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                APPLIQUER TOUT ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL ACWR DÉTAIL ── */}
       {showACWRDetail && (()=>{
