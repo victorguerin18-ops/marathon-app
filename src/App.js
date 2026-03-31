@@ -198,13 +198,6 @@ function computeProtectionScore({ done, readiness, weeklyVol }) {
   return { total, signals, level, acwr };
 }
 
-function fmtPaceStr(secPerKm) {
-  if (!secPerKm || secPerKm <= 0) return "--'--\"";
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
-  return `${m}'${String(s).padStart(2, '0')}"`;
-}
-
 // ─── VMA MODAL ───────────────────────────────────────────────────────
 function VMAModal({ done, currentVMA, onClose }) {
   const result = useMemo(() => computeVMA(done), [done]);
