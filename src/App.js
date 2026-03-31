@@ -48,7 +48,6 @@ function fmtDate(d, opts={weekday:"short",day:"numeric",month:"short"}) {
 }
 function isToday(d)  { return d === TODAY_STR; }
 function isFuture(d) { return parseDate(d) > TODAY; }
-function isPast(d)   { return parseDate(d) < TODAY; }
 function pace(dist,dur) {
   if(!dist||!dur) return "--'--\"";
   const s=(dur*60)/dist;
