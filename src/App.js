@@ -1150,8 +1150,6 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
     const qualBudget = Math.min(totalQualKm, targetKm * maxQualRatio);
 
     // Volume EF+Footing restant budgété
-    const easyBudget = remainingKm - Math.max(0, qualBudget - doneQualKm);
-
     // Calcul distance idéale pour chaque séance restante
     const adaptedSessions = remaining.map(p => {
       const isSL = p.type === SL_TYPE;
@@ -1170,7 +1168,6 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
         idealDist = Math.round(slTarget * 10) / 10;
       } else if (isEF && nEFRemaining > 0) {
         // EF = volume restant (hors qualité et SL) / nb séances EF restantes
-        const slRemKm = remaining.filter(s=>s.type===SL_TYPE).reduce((s,p)=>s+p.targetDist*0.30/0.28,0);
         const efBudget = remainingKm - Math.max(0, qualBudget - doneQualKm) - (nSLRemaining * targetKm * 0.30);
         idealDist = Math.max(4, Math.round((efBudget / nEFRemaining) * 10) / 10);
       } else if (isQual) {
