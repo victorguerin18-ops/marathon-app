@@ -80,19 +80,30 @@ function computeVMA(doneList) {
 
   if (evalTests.length > 0) {
     const latest = evalTests[0];
-    // Formule Cooper 6 min : VMA ≈ dist_km / 0.1 (règle simplifiée)
-    // Si dist = 1.8km en 6 min → VMA ≈ 18 km/h (vitesse réelle × correction)
-    // Vitesse moyenne = dist_km / (dur_min / 60) = dist_km × 60 / dur_min
-    const avgSpeedKmh = (latest.dist / latest.dur) * 60;
-    // VMA ≈ vitesse moyenne × 1.05 (légère correction Cooper)
-    const vmaFromTest = Math.round(avgSpeedKmh * 1.05 * 100) / 100;
+    // Utiliser vma6minDist si disponible (distance des 6min pures, sans échauff)
+    // Sinon fallback sur dist totale (moins précis)
+    const calcVMA = (t) => {
+      const d6 = t.vma6minDist || null;
+      if (d6 && d6 > 0) {
+        // Distance couverte en 6 min exactement → VMA = d6 / 6 * 60 × 1.05
+        return Math.round((d6 / 6 * 60 * 1.05) * 100) / 100;
+      }
+      // Fallback : soustraire échauff/cooldown estimés (~3km à allure EF)
+      const efDistEst = Math.min(3.0, t.dist * 0.25); // max 25% dist = échauff+cooldown
+      const workDist = Math.max(t.dist - efDistEst, t.dist * 0.6);
+      const workDur  = Math.max(t.dur - 20, 6); // au moins 6 min
+      return Math.round((workDist / workDur * 60 * 1.05) * 100) / 100;
+    };
+    const vmaFromTest = calcVMA(latest);
 
     // Historique des tests
     const testHistory = evalTests.slice(0, 5).map(t => ({
       date: t.date,
       dist: t.dist,
       dur: t.dur,
-      vma: Math.round((t.dist / t.dur * 60 * 1.05) * 100) / 100,
+      vma6minDist: t.vma6minDist || null,
+      vma: calcVMA(t),
+      hasPreciseData: !!t.vma6minDist,
     }));
 
     return {
@@ -113,13 +124,19 @@ function computeVMA(doneList) {
   );
 
   if (seuilSessions.length >= 2) {
-    // Prendre les 3 meilleures allures (pas la moyenne — on veut le potentiel)
-    const paces = seuilSessions
-      .map(r => ({ pace: (r.dur * 60) / r.dist, date: r.date }))
-      .sort((a, b) => a.pace - b.pace) // plus rapide en premier
-      .slice(0, 3);
+    // Soustraire l'échauff + cooldown (2×10min en EF) pour avoir l'allure réelle au seuil
+    // EF ≈ 70% VMA → on ne connaît pas encore la VMA, on utilise une EF estimée à 6'00"/km = 10km/h
+    // Durée travail pur ≈ durée totale - 20min ; distance travail pur ≈ dist - 2×(10/60×10) = dist - 3.3km
+    const paces = seuilSessions.map(r => {
+      const efSpeedKmh = 10; // estimation conservative EF ~6'00"/km
+      const warmupDistKm = (10 / 60) * efSpeedKmh * 2; // 2 × 10min à allure EF
+      const workDist = Math.max(r.dist - warmupDistKm, r.dist * 0.6); // au moins 60% de la dist totale
+      const workDur  = Math.max(r.dur - 20, r.dur * 0.6);             // au moins 60% de la durée
+      return { pace: (workDur * 60) / workDist, date: r.date, workDist };
+    }).sort((a, b) => a.pace - b.pace).slice(0, 3);
+
     const bestPace = paces[0].pace;
-    // Seuil ≈ 87% VMA
+    // Seuil ≈ 87% VMA → VMA = vitesse_seuil / 0.87
     const vmaEstimate = Math.round((3600 / bestPace / 0.87) * 100) / 100;
 
     return {
@@ -170,19 +187,39 @@ function computeProtectionScore({ done, readiness, weeklyVol }) {
   signals.push({ key: "VOL", label: "Progression volume", score: volScore, weight: 0.10, value: `${volPct > 0 ? "+" : ""}${Math.round(volPct)}%`, optimal: "≤+10%/sem" });
 
   // ── Monotonie entraînement (10%) ─────────────────────────────────
-  // Monotonie = charge_moy_7j / écart-type_charge_7j
-  // Si tout au même RPE → monotonie élevée → risque
-  const last7 = done.filter(r => r.date >= addDays(TODAY_STR, -7));
+  // Logique lisible : % de séances dans la même catégorie d'intensité sur 14j
+  // Catégories : EASY (EF, Footing, SL), HARD (VMA, Seuil, Éval)
+  // Si 80%+ des séances sont dans la même catégorie → monotonie élevée
+  const last14 = done.filter(r => r.date >= addDays(TODAY_STR, -14));
   let monoScore = 100;
-  if (last7.length >= 3) {
-    const loads = last7.map(r => r.dist * (r.rpe || 5));
-    const mean  = loads.reduce((s, v) => s + v, 0) / loads.length;
-    const std   = Math.sqrt(loads.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / loads.length);
-    const mono  = std > 0 ? mean / std : 1;
-    // Monotonie <2 = bien, 2-3 = moyen, >3 = risqué
-    monoScore = mono <= 2 ? 100 : mono <= 3 ? Math.round(100 - (mono - 2) * 40) : Math.max(0, Math.round(60 - (mono - 3) * 40));
+  let monoLabel = "variée";
+  let monoDetail = "";
+  if (last14.length >= 3) {
+    const HARD = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
+    const nHard = last14.filter(r => HARD.includes(r.type)).length;
+    const nEasy = last14.length - nHard;
+    const dominantPct = Math.max(nHard, nEasy) / last14.length; // % du type dominant
+    const hardPct = Math.round((nHard / last14.length) * 100);
+
+    // Aussi vérifier la variété dans EASY (EF vs SL vs Footing)
+    const easyTypes = new Set(last14.filter(r => !HARD.includes(r.type)).map(r => r.type));
+
+    if (dominantPct >= 0.85) {
+      // Quasi-totalité dans une seule catégorie
+      monoScore = 30;
+      monoLabel = "élevée";
+    } else if (dominantPct >= 0.70) {
+      monoScore = 60;
+      monoLabel = "modérée";
+    } else {
+      // Bon mix Easy/Hard + variété dans les types easy
+      const varietyBonus = easyTypes.size >= 2 ? 10 : 0;
+      monoScore = Math.min(100, 80 + varietyBonus);
+      monoLabel = "variée";
+    }
+    monoDetail = `${hardPct}% intensif · ${100-hardPct}% facile sur 14j`;
   }
-  signals.push({ key: "MONO", label: "Monotonie", score: monoScore, weight: 0.10, value: monoScore >= 80 ? "variée" : monoScore >= 60 ? "modérée" : "élevée", optimal: "variée" });
+  signals.push({ key: "MONO", label: "Monotonie", score: monoScore, weight: 0.10, value: monoLabel, detail: monoDetail, optimal: "variée (30-40% intensif)" });
 
   // ── Readiness VFC + récup (45%) ───────────────────────────────────
   const readinessScore = readiness ?? 65; // 65 par défaut si pas de check-in
@@ -401,6 +438,7 @@ export default function App() {
   const [weekAdjustModal, setWeekAdjustModal] = useState(null); // {session, newDist, reason, isAlert}
   const [weekAdjustDismissed, setWeekAdjustDismissed] = useState(()=>STORE.get('week_adjust_'+wkKey(new Date().toISOString().split('T')[0]), false));
   const [showACWRDetail, setShowACWRDetail] = useState(false);
+  const [showMonoDetail, setShowMonoDetail] = useState(false);
 
   // Modal débrief post-Strava
   const [stravaDebriefModal, setStravaDebriefModal] = useState(null); // {stravaSession, plannedSession}
@@ -494,7 +532,7 @@ export default function App() {
       type:      existing.type,                  // type modifié manuellement conservé
       rpe:       existing.rpe,                   // RPE manuel conservé
       feeling:   existing.feeling,               // ressenti conservé
-      notes:     existing.notes || incoming.notes,
+      notes:     existing.notes ?? incoming.notes,
       plannedId: existing.plannedId || autoPlannedId, // lien conservé ou auto-détecté
     };
   }
@@ -2427,7 +2465,7 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
         const acwrRaw = parseFloat(acwrSig?.value) || 1;
 
         // Séances 7 derniers jours pour monotonie
-        const last7Runs = done.filter(r => r.date >= addDays(TODAY_STR, -7));
+        const last7Runs = done.filter(r => r.date >= addDays(TODAY_STR, -14));
         const last7ByType = {};
         last7Runs.forEach(r => { if(!last7ByType[r.type]) last7ByType[r.type]={runs:0,km:0}; last7ByType[r.type].runs++; last7ByType[r.type].km+=r.dist; });
 
@@ -2538,18 +2576,23 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
               </div>
 
               {/* ── 3. MONOTONIE (10%) ── */}
-              <div style={{marginBottom:24,padding:"18px",background:SigColor(monoSig?.score||0)+"0A",border:`1px solid ${SigColor(monoSig?.score||0)}22`,borderRadius:16}}>
+              <div onClick={()=>{setShowProtectionDetail(false);setShowMonoDetail(true);}} style={{marginBottom:24,padding:"18px",background:SigColor(monoSig?.score||0)+"0A",border:`1px solid ${SigColor(monoSig?.score||0)}22`,borderRadius:16,cursor:"pointer"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
                     <div style={{fontSize:10,color:SigColor(monoSig?.score||0),letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>MONOTONIE · 10%</div>
                     <div style={{fontSize:16,fontWeight:800,color:SigColor(monoSig?.score||0)}}>{monoSig?.value||"—"}</div>
+                    <div style={{fontSize:10,color:SigColor(monoSig?.score||0)+"88",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>Voir détail →</div>
                   </div>
                   <div style={{fontSize:36,fontWeight:800,color:SigColor(monoSig?.score||0),letterSpacing:-2}}>{monoSig?.score||0}</div>
                 </div>
                 {/* Types des 7 derniers jours */}
+                {/* Sous-titre monotonie */}
+                {monoSig?.detail&&(
+                  <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>{monoSig.detail}</div>
+                )}
                 {last7Runs.length > 0 ? (
                   <div style={{marginBottom:10}}>
-                    <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:6,letterSpacing:1}}>SÉANCES 7 DERNIERS JOURS</div>
+                    <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:6,letterSpacing:1}}>SÉANCES 14 DERNIERS JOURS</div>
                     {Object.entries(last7ByType).map(([type,data])=>{
                       const tm={
                         "Endurance fondamentale":{color:"#6BF178",icon:"◈"},
@@ -2687,6 +2730,156 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
           </div>
         </div>
       )}
+
+      {/* ── MODAL MONOTONIE DÉTAIL ── */}
+      {showMonoDetail && (()=>{
+        const HARD = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
+        const last14 = done.filter(r => r.date >= addDays(TODAY_STR, -14))
+          .sort((a,b) => a.date.localeCompare(b.date));
+        const monoSig = protectionScore.signals.find(s=>s.key==="MONO");
+        const color = monoSig?.score>=75?"#4ECDC4":monoSig?.score>=50?"#FF9F43":"#FF6B6B";
+
+        // Grouper par type pour le donut
+        const byType = {};
+        last14.forEach(r => {
+          if(!byType[r.type]) byType[r.type]={count:0,km:0};
+          byType[r.type].count++;
+          byType[r.type].km += r.dist;
+        });
+        const total = last14.length;
+        const TMETA = {
+          "Endurance fondamentale":{color:"#6BF178",icon:"◈"},
+          "Fractionné / VMA":{color:"#FF6B6B",icon:"▲▲"},
+          "Tempo / Seuil":{color:"#FF9F43",icon:"◇"},
+          "Sortie longue":{color:"#C77DFF",icon:"◈◈◈"},
+          "Footing":{color:"#A8DADC",icon:"〜"},
+          "Évaluation VMA":{color:"#00D2FF",icon:"⚡"},
+        };
+
+        // Barres par semaine (S-2 et S-1)
+        const weeks = [1,0].map(i => {
+          const wkRuns = done.filter(r =>
+            r.date >= addDays(TODAY_STR, -(i+1)*7) &&
+            r.date < addDays(TODAY_STR, -i*7)
+          );
+          const hard = wkRuns.filter(r=>HARD.includes(r.type));
+          const easy = wkRuns.filter(r=>!HARD.includes(r.type));
+          const wkLabel = i===0?"S-1 (semaine passée)":"S-2";
+          return { label:wkLabel, isCurrent:i===0, runs:wkRuns.length, hard:hard.length, easy:easy.length,
+            hardKm:Math.round(hard.reduce((s,r)=>s+r.dist,0)*10)/10,
+            easyKm:Math.round(easy.reduce((s,r)=>s+r.dist,0)*10)/10,
+          };
+        });
+
+        // Semaine en cours
+        const curWkRuns = done.filter(r => r.date >= addDays(TODAY_STR, -7));
+        const curHard = curWkRuns.filter(r=>HARD.includes(r.type));
+        const curEasy = curWkRuns.filter(r=>!HARD.includes(r.type));
+
+        return (
+          <div onClick={()=>setShowMonoDetail(false)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{width:"100%",maxWidth:480,background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))",maxHeight:"90vh",overflowY:"auto"}}>
+
+              {/* Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+                <div>
+                  <div style={{fontSize:10,color,letterSpacing:3,fontFamily:"'JetBrains Mono',monospace",marginBottom:6}}>MONOTONIE DE L'ENTRAÎNEMENT</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                    <span style={{fontSize:36,fontWeight:800,color,letterSpacing:-2,lineHeight:1}}>{monoSig?.score||0}</span>
+                    <span style={{fontSize:16,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>/100 · {monoSig?.value}</span>
+                  </div>
+                  {monoSig?.detail&&<div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{monoSig.detail}</div>}
+                </div>
+                <button onClick={()=>setShowMonoDetail(false)}
+                  style={{background:"#1C1F27",border:"none",color:"#888",fontSize:18,cursor:"pointer",borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              </div>
+
+              {/* Répartition visuelle semaine courante */}
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>CETTE SEMAINE (7 DERNIERS JOURS)</div>
+                {curWkRuns.length > 0 ? (<>
+                  {/* Barre intensité vs facile */}
+                  <div style={{display:"flex",height:36,borderRadius:10,overflow:"hidden",marginBottom:8,gap:2}}>
+                    {curEasy.length>0&&<div style={{flex:curEasy.length,background:"#6BF17833",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#6BF178",fontFamily:"'JetBrains Mono',monospace"}}>
+                      {curEasy.length} facile{curEasy.length>1?"s":""}
+                    </div>}
+                    {curHard.length>0&&<div style={{flex:curHard.length,background:"#FF6B6B33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#FF6B6B",fontFamily:"'JetBrains Mono',monospace"}}>
+                      {curHard.length} intensi{curHard.length>1?"ves":"ve"}
+                    </div>}
+                  </div>
+                  <div style={{fontSize:10,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:12}}>
+                    Cible : 1-2 séances intensives · {Math.round((1.5/Math.max(curWkRuns.length,4))*100)}–{Math.round((2/Math.max(curWkRuns.length,4))*100)}% du total
+                  </div>
+                </>) : <div style={{fontSize:11,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginBottom:12}}>Pas encore de séances cette semaine</div>}
+              </div>
+
+              {/* Répartition par type sur 14j */}
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>RÉPARTITION PAR TYPE — 14 JOURS ({total} séances)</div>
+                {total > 0 ? (
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {Object.entries(byType).sort(([,a],[,b])=>b.count-a.count).map(([type,data])=>{
+                      const tm = TMETA[type]||{color:"#888",icon:"○"};
+                      const pct = Math.round((data.count/total)*100);
+                      return (
+                        <div key={type}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>
+                            <span style={{color:tm.color}}>{tm.icon} {type}</span>
+                            <span style={{color:"#888"}}>{data.count} séance{data.count>1?"s":""} · {data.km.toFixed(0)}km · {pct}%</span>
+                          </div>
+                          <div style={{height:6,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct}%`,background:tm.color,borderRadius:3,transition:"width 0.8s ease"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : <div style={{fontSize:11,color:"#444",fontFamily:"'JetBrains Mono',monospace"}}>Pas assez de données (14 jours)</div>}
+              </div>
+
+              {/* Comparaison S-2 vs S-1 */}
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:10,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>INTENSITÉ PAR SEMAINE</div>
+                <div style={{display:"flex",gap:8}}>
+                  {weeks.map(w=>(
+                    <div key={w.label} style={{flex:1,background:"#080A0E",borderRadius:10,padding:"12px 10px",border:"1px solid #1C1F27"}}>
+                      <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>{w.label}</div>
+                      <div style={{marginBottom:6}}>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>
+                          <span style={{color:"#6BF178"}}>Facile</span>
+                          <span style={{color:"#6BF178"}}>{w.easyKm}km</span>
+                        </div>
+                        <div style={{height:5,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${(w.easyKm/Math.max(w.easyKm+w.hardKm,1))*100}%`,background:"#6BF17844",borderRadius:3}}/>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>
+                          <span style={{color:"#FF6B6B"}}>Intensif</span>
+                          <span style={{color:"#FF6B6B"}}>{w.hardKm}km</span>
+                        </div>
+                        <div style={{height:5,background:"#1C1F27",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${(w.hardKm/Math.max(w.easyKm+w.hardKm,1))*100}%`,background:"#FF6B6B44",borderRadius:3}}/>
+                        </div>
+                      </div>
+                      <div style={{fontSize:9,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:6}}>{w.runs} séances</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Explication */}
+              <div style={{padding:"14px 16px",background:"#080A0E",borderRadius:12,border:"1px solid #1C1F27",fontSize:11,color:"#666",fontFamily:"'JetBrains Mono',monospace",lineHeight:1.8}}>
+                <span style={{color:"#E8E4DC"}}>Monotonie = répétition des mêmes stimuli.</span><br/>
+                Un entraînement varié (mix EF, VMA, SL) stimule mieux les adaptations et réduit le risque de blessure par surcharge localisée.<br/><br/>
+                <span style={{color:"#6BF178"}}>Idéal :</span> 1-2 séances intensives + 2-3 séances faciles/semaine. <span style={{color:"#FF9F43"}}>Attention</span> si 3+ séances intensives consécutives.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── MODAL ACWR DÉTAIL ── */}
       {showACWRDetail && (()=>{
@@ -2889,8 +3082,29 @@ Format : utilise ces 4 titres en majuscules, sois direct, pas d'intro ni de conc
               </div>
               <FormGrid>
                 <Field label="DATE"><input type="date" className="inp" value={logForm.date} onChange={e=>setLogForm({...logForm,date:e.target.value})}/></Field>
-                <Field label="DISTANCE (km)"><input type="number" className="inp" placeholder="10.5" value={logForm.dist} onChange={e=>setLogForm({...logForm,dist:e.target.value})}/></Field>
-                <Field label="DURÉE (min)"><input type="number" className="inp" placeholder="68" value={logForm.dur} onChange={e=>setLogForm({...logForm,dur:e.target.value})}/></Field>
+                <Field label="DISTANCE TOTALE (km)"><input type="number" className="inp" placeholder="10.5" value={logForm.dist} onChange={e=>setLogForm({...logForm,dist:e.target.value})}/></Field>
+                <Field label="DURÉE TOTALE (min)"><input type="number" className="inp" placeholder="68" value={logForm.dur} onChange={e=>setLogForm({...logForm,dur:e.target.value})}/></Field>
+              </FormGrid>
+              {logForm.type==="Évaluation VMA"&&(
+                <div style={{padding:"12px 14px",background:"#001f2b",border:"1px solid #00D2FF33",borderRadius:10,marginBottom:16}}>
+                  <div style={{fontSize:10,color:"#00D2FF",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>⚡ TEST 6 MIN — DONNÉES PRÉCISES</div>
+                  <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:10,lineHeight:1.6}}>
+                    Indique la distance couverte <span style={{color:"#E8E4DC"}}>uniquement pendant les 6 minutes</span> à fond (sans l'échauffement ni le retour au calme). C'est ce chiffre qui sera utilisé pour calculer ta VMA.
+                  </div>
+                  <Field label="DISTANCE 6 MIN PURES (km)" full>
+                    <input type="number" className="inp" placeholder="ex: 1.85" step="0.01"
+                      value={logForm.vma6minDist||""}
+                      onChange={e=>setLogForm({...logForm,vma6minDist:e.target.value})}
+                      style={{borderColor:"#00D2FF44"}}/>
+                  </Field>
+                  {logForm.vma6minDist&&parseFloat(logForm.vma6minDist)>0&&(
+                    <div style={{marginTop:8,fontSize:12,fontFamily:"'JetBrains Mono',monospace",color:"#00D2FF"}}>
+                      → VMA estimée : <span style={{fontWeight:700,fontSize:16}}>{(parseFloat(logForm.vma6minDist)/6*60*1.05).toFixed(2)} km/h</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <FormGrid>
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" placeholder="145" value={logForm.hr} onChange={e=>setLogForm({...logForm,hr:e.target.value})}/></Field>
                 <Field label={`RPE · ${logForm.rpe}/10`} full>
                   <input type="range" min="1" max="10" value={logForm.rpe} onChange={e=>setLogForm({...logForm,rpe:e.target.value})} style={{width:"100%",accentColor:"#FFE66D"}}/>
