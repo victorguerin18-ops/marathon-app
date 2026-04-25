@@ -32,7 +32,7 @@ export default function CoachView({
     const lastPace=efRuns.length?(efRuns[efRuns.length-1].dur*60)/efRuns[efRuns.length-1].dist:null;
     const todayDone=done.find(d=>d.date===TODAY_STR);
     const todayPlannedSession=planned.find(p=>p.date===TODAY_STR);
-    const readiness=checkInSaved?(checkIn.readiness??calcReadiness(checkIn.hrv,checkIn.recovery,checkIn.feeling)):null;
+    const readiness=checkInSaved?(checkIn.readiness??calcReadiness(parseFloat(checkIn.bevelRecovery)||0,parseFloat(checkIn.hrv)||0,parseFloat(checkIn.restingHR)||0,parseFloat(checkIn.sleepHours)||0,checkIn.feelingScore||3)):null;
     const ps=protectionScore;
 
     return `Tu es le coach marathon de Victor. Sois CONCIS (max 5 phrases sauf si question précise). Pose une question si tu as besoin d'une info manquante. Pas d'intro générique, va droit au but.
@@ -40,7 +40,7 @@ export default function CoachView({
 PROFIL : Victor, Marathon de Lille 25/10/2026 (${DAYS_LEFT}j/${WEEKS_LEFT}sem), sub-3h30, VMA ${planConfig.vma}km/h, allures : EF ${fmtPace(planConfig.paces.ef)}/km · Seuil ${fmtPace(planConfig.paces.tempo)}/km · VMA ${fmtPace(planConfig.paces.vma)}/km · Marathon ~4'58"/km
 
 ÉTAT DU JOUR :
-- Readiness : ${readiness!==null?`${readiness}/100 (VFC ${checkIn.hrv||'?'}ms, récup ${checkIn.recovery||'?'}%, sensation ${checkIn.feeling===0?'🟢 frais':checkIn.feeling===1?'🟡 correct':checkIn.feeling===2?'🔴 fatigué':'non renseigné'})`:'check-in non fait'}
+- Readiness : ${readiness!==null?`${readiness}/100 (Bevel récup ${checkIn.bevelRecovery||'?'}%, VFC ${checkIn.hrv||'?'}ms, FC repos ${checkIn.restingHR||'?'}bpm, sommeil ${checkIn.sleepHours||'?'}h, sensation ${['','Épuisé','Fatigué','Correct','Bien','Excellent'][checkIn.feelingScore||3]})`:'check-in non fait'}
 - Protection blessure : ${ps.total}/100 (${ps.level.label}) — ACWR ${ps.signals.find(s=>s.key==='ACWR')?.value||'?'}, monotonie ${ps.signals.find(s=>s.key==='MONO')?.value||'?'}
 - Séance du jour prévue : ${todayPlannedSession?`${todayPlannedSession.type} ${todayPlannedSession.targetDist}km`:'aucune'}
 - Séance du jour réalisée : ${todayDone?`${todayDone.type} ${todayDone.dist}km en ${todayDone.dur}min, FC ${todayDone.hr||'?'}bpm, RPE ${todayDone.rpe||'?'}, ressenti ${["😣","😕","😐","🙂","😄"][(todayDone.feeling||3)-1]}`:'pas encore'}

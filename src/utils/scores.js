@@ -114,29 +114,38 @@ export function computeProtectionScore({ done, readiness, weeklyVol }) {
   return { total, signals, level, acwr };
 }
 
-export function calcReadiness(hrv, recovery, feeling) {
-  const h = parseFloat(hrv) || 0;
-  const r = parseFloat(recovery) || 0;
-  const f = feeling;
-  const hrvScore  = h <= 0 ? 50 : h >= 85 ? 100 : h >= 75 ? 80 + (h-75)/10*20 : h >= 60 ? 50 + (h-60)/15*30 : Math.max(0, h/60*50);
-  const recScore  = r <= 0 ? 50 : Math.min(r, 100);
-  const feelScore = f === null ? 65 : f === 0 ? 100 : f === 1 ? 65 : 30;
-  return Math.min(100, Math.max(0, Math.round(hrvScore * 0.45 + recScore * 0.35 + feelScore * 0.20)));
+export function calcReadiness(bevelRecovery, hrv, restingHR, sleepHours, feelingScore) {
+  const sBevel = bevelRecovery > 0 ? Math.min(bevelRecovery, 100) : 50;
+  const sHRV = hrv <= 0 ? 50
+    : hrv >= 90 ? 100
+    : hrv >= 63 ? 70 + (hrv - 63) / 35 * 30
+    : Math.max(10, 70 - (63 - hrv) * 2);
+  const sHR = restingHR <= 0 ? 50
+    : restingHR <= 45 ? 100
+    : restingHR <= 52 ? 90
+    : restingHR <= 60 ? 75
+    : restingHR <= 65 ? 55
+    : Math.max(10, 55 - (restingHR - 65) * 3);
+  const sSleep = sleepHours <= 0 ? 50
+    : sleepHours >= 8 ? 100
+    : sleepHours >= 7 ? 80 + (sleepHours - 7) * 20
+    : sleepHours >= 6 ? 50 + (sleepHours - 6) * 30
+    : Math.max(5, sleepHours / 6 * 50);
+  const sFeel = ({1:10, 2:35, 3:65, 4:85, 5:100})[feelingScore] || 65;
+  return Math.round(Math.min(100, Math.max(0, sBevel*0.60 + sHRV*0.15 + sHR*0.10 + sSleep*0.10 + sFeel*0.05)));
 }
 
-export function getReadinessReco(score, hrv, plannedType) {
+export function getReadinessReco(score, hrv, plannedType, bevelRecovery = 0) {
   const h = parseFloat(hrv) || 0;
+  const b = parseFloat(bevelRecovery) || 0;
   const sessionLabel = plannedType || "ta séance";
-  if (score >= 85) {
-    if (h >= 78) return `VFC à ${h}ms — tu es frais et ton système nerveux est prêt. ${sessionLabel} validée 💪`;
-    return `Score excellent — tout vert pour ${sessionLabel} aujourd'hui 💪`;
-  }
+  if (score >= 85) return `${b > 0 ? `Bevel ${b}% · ` : ''}Tu es en pleine forme. ${sessionLabel} — c'est le bon moment pour t'exprimer 💪`;
   if (score >= 65) {
-    if (h >= 70 && h < 78) return `VFC à ${h}ms — bonne forme. EF ou séance modérée, évite l'intensité maximale.`;
-    return `Forme correcte — ${sessionLabel} possible, reste à l'écoute de ton corps.`;
+    if (h >= 78) return `VFC à ${h}ms — bonne récup. ${sessionLabel} possible, reste à l'écoute à l'échauffement.`;
+    return `Forme correcte — ${sessionLabel} possible, surveille tes sensations en début de séance.`;
   }
-  if (score >= 45) return `VFC à ${h > 0 ? h+"ms — " : ""}ton corps récupère encore. EF légère ou repos recommandé.`;
-  return `VFC à ${h > 0 ? h+"ms — " : ""}fatigue détectée. Repos ou marche active aujourd'hui.`;
+  if (score >= 45) return `${b > 0 ? `Bevel ${b}% — ` : ''}corps encore en récupération. EF légère ou repos recommandé.`;
+  return `${b > 0 ? `Bevel ${b}% — ` : ''}fatigue détectée. Repos ou marche active recommandé aujourd'hui.`;
 }
 
 export function getReadinessAdvice(readiness, todaySession, weekPlanned, doneSessions) {

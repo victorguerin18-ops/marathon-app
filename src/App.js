@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities, getValidToken } from './strava';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin, loadRecentCheckins } from './db';
 import { PlanWizard, generatePlanFromConfig, defaultConfig } from './PlanWizard';
 import { VMA_DEFAULT, STORE, TODAY_STR, TYPE_META, FEELINGS } from './constants';
 import { fmtDate, wkKey, addDays, parseDate, isFuture } from './utils/dates';
@@ -36,8 +36,9 @@ export default function App() {
   const [showWizard,    setShowWizard]    = useState(false);
   const [planGenLoading,setPlanGenLoading]= useState(false);
 
-  const [checkIn,     setCheckIn]     = useState({ hrv: "", recovery: "", feeling: null });
+  const [checkIn,     setCheckIn]     = useState({ hrv: '', bevelRecovery: '', restingHR: '', sleepHours: '', feelingScore: 3, readiness: null, morningBrief: null, briefDate: null });
   const [checkInSaved,setCheckInSaved]= useState(false);
+  const [recentCheckins, setRecentCheckins] = useState([]);
 
   const [weekAdjustModal,     setWeekAdjustModal]     = useState(null);
   const [weekAdjustDismissed, setWeekAdjustDismissed] = useState(()=>STORE.get('week_adjust_'+wkKey(TODAY_STR), false));
@@ -53,8 +54,8 @@ export default function App() {
   useEffect(()=>{
     async function init(){
       setLoading(true);
-      const [p,d,ci]=await Promise.all([loadPlanned(),loadDone(),loadCheckin(TODAY_STR)]);
-      setPlanned(p); setDone(d);
+      const [p,d,ci,rc]=await Promise.all([loadPlanned(),loadDone(),loadCheckin(TODAY_STR),loadRecentCheckins(8)]);
+      setPlanned(p); setDone(d); setRecentCheckins(rc);
       if(ci){ setCheckIn(ci); setCheckInSaved(true); }
       setLoading(false);
       const token = await getValidToken();
@@ -193,10 +194,19 @@ export default function App() {
   }
 
   async function onSaveCheckIn(data) {
-    const readiness = calcReadiness(data.hrv, data.recovery, data.feeling);
-    await saveCheckin(TODAY_STR, data.hrv, data.recovery, data.feeling, readiness);
-    setCheckIn({...data, readiness});
+    const readiness = calcReadiness(
+      parseFloat(data.bevelRecovery)||0, parseFloat(data.hrv)||0,
+      parseFloat(data.restingHR)||0, parseFloat(data.sleepHours)||0,
+      data.feelingScore||3
+    );
+    const fullData = { ...data, readiness };
+    await saveCheckin(TODAY_STR, fullData);
+    setCheckIn(fullData);
     setCheckInSaved(true);
+    setRecentCheckins(prev => {
+      const filtered = prev.filter(c => c.date !== TODAY_STR);
+      return [{ date: TODAY_STR, hrv: parseFloat(fullData.hrv)||null, bevelRecovery: parseInt(fullData.bevelRecovery)||null, restingHR: parseFloat(fullData.restingHR)||null, sleepHours: parseFloat(fullData.sleepHours)||null, feelingScore: fullData.feelingScore||3, readiness }, ...filtered];
+    });
   }
 
   async function applyReadinessAction(action, todaySession) {
@@ -358,7 +368,7 @@ export default function App() {
 
   const protectionScore = useMemo(() => {
     const readiness = checkInSaved
-      ? (checkIn.readiness ?? (checkIn.hrv || checkIn.recovery ? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling) : null))
+      ? (checkIn.readiness ?? calcReadiness(parseFloat(checkIn.bevelRecovery)||0, parseFloat(checkIn.hrv)||0, parseFloat(checkIn.restingHR)||0, parseFloat(checkIn.sleepHours)||0, checkIn.feelingScore||3))
       : null;
     return computeProtectionScore({ done, readiness, weeklyVol });
   }, [done, checkIn, checkInSaved, weeklyVol]);
@@ -370,33 +380,33 @@ export default function App() {
   const upcoming     = planned.filter(p=>isFuture(p.date)).sort((a,b)=>a.date.localeCompare(b.date));
 
   const css=`
-    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{background:#080A0E}
-    ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#222}
-    .card{background:#0F1117;border:1px solid #1C1F27;border-radius:14px}
+    body{background:#161618}
+    ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#333}
+    .card{background:#242426;border-radius:18px}
     .nav-tab{transition:all .2s;border:none;cursor:pointer;font-family:inherit}
     .btn-primary{transition:all .2s;border:none;cursor:pointer;font-family:inherit}
     .btn-primary:hover{opacity:.85;transform:scale(.98)}
-    .btn-ghost{transition:all .2s;background:transparent;border:1px solid #222;cursor:pointer;font-family:inherit;color:#888}
-    .btn-ghost:hover{border-color:#444;color:#ccc}
-    .inp{background:#080A0E;border:1px solid #1C1F27;color:#E8E4DC;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;width:100%;outline:none;transition:border .2s}
-    .inp:focus{border-color:#444}
+    .btn-ghost{transition:all .2s;background:#333;border:none;cursor:pointer;font-family:'Inter',sans-serif;color:#aaa;border-radius:50px;padding:8px 14px;font-size:11px;font-weight:600}
+    .btn-ghost:hover{background:#444;color:#fff}
+    .inp{background:#333;border:none;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;font-family:'Inter',sans-serif;width:100%;outline:none;transition:background .2s}
+    .inp:focus{background:#3a3a3c}
     @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
     .fade-up{animation:fadeUp .35s ease forwards}
     @keyframes pop{0%{transform:scale(.95);opacity:0}100%{transform:scale(1);opacity:1}}
     .pop{animation:pop .2s ease forwards}
     @keyframes popUp{0%{transform:translateY(30px);opacity:0}100%{transform:translateY(0);opacity:1}}
-    .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-family:'JetBrains Mono',monospace}
+    .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-family:'Inter',sans-serif;font-weight:600}
     .score-ring{transition:stroke-dashoffset 1s ease}
     @keyframes spin{to{transform:rotate(360deg)}}
     .spin{animation:spin 1s linear infinite;display:inline-block}
-    .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 4px;background:transparent;font-family:'JetBrains Mono',monospace;font-size:9px;flex:1;text-align:center;line-height:1.3}
-    .seg-btn{transition:all .15s;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 8px;border-radius:6px;letter-spacing:.5px}
-    .smooth-btn{transition:all .15s;border:1px solid #222;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;padding:4px 8px;border-radius:6px;background:transparent;color:#888}
-    .smooth-btn.active{border-color:#555;color:#E8E4DC;background:#1C1F27}
-    .chat-inp{background:#080A0E;border:1px solid #1C1F27;color:#E8E4DC;border-radius:12px;padding:12px 14px;font-size:13px;font-family:'JetBrains Mono',monospace;width:100%;outline:none;resize:none}
-    .chat-inp:focus{border-color:#333}
+    .type-btn{transition:all .15s;border:2px solid transparent;cursor:pointer;border-radius:10px;padding:8px 4px;background:transparent;font-family:'Inter',sans-serif;font-size:9px;flex:1;text-align:center;line-height:1.3;font-weight:500}
+    .seg-btn{transition:all .15s;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-size:10px;padding:5px 8px;border-radius:6px;font-weight:600}
+    .smooth-btn{transition:all .15s;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-size:9px;padding:4px 8px;border-radius:6px;background:transparent;color:#666}
+    .smooth-btn.active{color:#fff;background:#333}
+    .chat-inp{background:#1a1a1c;border:none;color:#fff;border-radius:12px;padding:12px 14px;font-size:13px;font-family:'Inter',sans-serif;width:100%;outline:none;resize:none}
+    .chat-inp:focus{outline:1px solid #444}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
     .pulse{animation:pulse 1.5s ease-in-out infinite}
     .vma-badge{transition:all .2s;cursor:pointer}
@@ -404,46 +414,46 @@ export default function App() {
   `;
 
   if(loading) return (
-    <div style={{minHeight:"100vh",background:"#080A0E",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+    <div style={{minHeight:"100vh",background:"#161618",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
       <style>{css}</style>
-      <div className="spin" style={{fontSize:32,color:"#E8E4DC"}}>↻</div>
-      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"#555",letterSpacing:2}}>CHARGEMENT...</div>
+      <div className="spin" style={{fontSize:32,color:"#fff"}}>↻</div>
+      <div style={{fontFamily:"'Inter',sans-serif",fontSize:12,color:"#555",letterSpacing:1,fontWeight:500}}>CHARGEMENT...</div>
     </div>
   );
 
   return (
-    <div style={{minHeight:"100vh",background:"#080A0E",fontFamily:"'Syne',sans-serif",color:"#E8E4DC",maxWidth:480,margin:"0 auto",paddingBottom:`calc(84px + env(safe-area-inset-bottom, 16px))`}}>
+    <div style={{minHeight:"100vh",background:"#161618",fontFamily:"'Inter',sans-serif",color:"#fff",maxWidth:480,margin:"0 auto",paddingBottom:`calc(84px + env(safe-area-inset-bottom, 16px))`}}>
       <style>{css}</style>
 
       {/* ── HEADER ── */}
       <div style={{padding:`calc(env(safe-area-inset-top, 0px) + 20px) 20px 0`,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <div style={{fontSize:11,color:"#555",letterSpacing:3,fontFamily:"'JetBrains Mono',monospace"}}>MARATHON DE LILLE</div>
+          <div style={{fontSize:11,color:"#555",letterSpacing:2,fontFamily:"'Inter',sans-serif",fontWeight:500}}>MARATHON DE LILLE</div>
           <div style={{fontSize:28,fontWeight:800,letterSpacing:-1,marginTop:2}}>
             {DAYS_LEFT}<span style={{fontSize:14,color:"#555",fontWeight:400,marginLeft:4}}>jours</span>
             <span style={{fontSize:14,color:"#333",margin:"0 6px"}}>·</span>
             {WEEKS_LEFT}<span style={{fontSize:14,color:"#555",fontWeight:400,marginLeft:4}}>sem.</span>
           </div>
-          <div style={{fontSize:10,color:"#333",fontFamily:"'JetBrains Mono',monospace",marginTop:2,letterSpacing:1}}>25 OCT 2026</div>
+          <div style={{fontSize:10,color:"#444",fontFamily:"'Inter',sans-serif",marginTop:2,fontWeight:500}}>25 OCT 2026</div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
           {checkInSaved && (()=>{
-            const r = checkIn.readiness ?? calcReadiness(checkIn.hrv, checkIn.recovery, checkIn.feeling);
-            const rc = r >= 85 ? "#4ECDC4" : r >= 65 ? "#6BF178" : r >= 45 ? "#FF9F43" : "#FF6B6B";
+            const r = checkIn.readiness ?? calcReadiness(parseFloat(checkIn.bevelRecovery)||0, parseFloat(checkIn.hrv)||0, parseFloat(checkIn.restingHR)||0, parseFloat(checkIn.sleepHours)||0, checkIn.feelingScore||3);
+            const rc = r >= 85 ? "#32D74B" : r >= 65 ? "#0A84FF" : r >= 45 ? "#FF9F0A" : "#FF453A";
             const rl = r >= 85 ? "TOP" : r >= 65 ? "BON" : r >= 45 ? "MOY." : "BAS";
             return (
-              <div style={{background:"#0F1117",border:`1px solid ${rc}33`,borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,cursor:"pointer",flexShrink:0}}
+              <div style={{background:"#242426",borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,cursor:"pointer",flexShrink:0}}
                 onClick={()=>setView("today")}>
-                <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>READY</div>
+                <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:4}}>READY</div>
                 <div style={{fontSize:20,fontWeight:800,color:rc,letterSpacing:-1,lineHeight:1}}>{r}</div>
-                <div style={{fontSize:8,color:rc,fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>{rl}</div>
+                <div style={{fontSize:8,color:rc,fontFamily:"'Inter',sans-serif",fontWeight:600,marginTop:3}}>{rl}</div>
               </div>
             );
           })()}
           <div className="vma-badge" onClick={() => setShowVMA(true)}
-            style={{position:"relative",background:vmaChanged?"linear-gradient(135deg,#001a24,#00D2FF18)":"#0F1117",border:`1px solid ${vmaChanged?"#00D2FF55":"#1C1F27"}`,borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,flexShrink:0}}>
-            <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>VMA</div>
-            <div style={{fontSize:20,fontWeight:800,color:vmaChanged?"#00D2FF":"#E8E4DC",letterSpacing:-1,lineHeight:1}}>{displayVMA.toFixed(1)}</div>
+            style={{position:"relative",background:"#242426",borderRadius:14,padding:"10px 12px",textAlign:"center",width:72,flexShrink:0}}>
+            <div style={{fontSize:8,color:"#555",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:4}}>VMA</div>
+            <div style={{fontSize:20,fontWeight:800,color:vmaChanged?"#0A84FF":"#fff",letterSpacing:-1,lineHeight:1}}>{displayVMA.toFixed(1)}</div>
             <div style={{fontSize:8,color:"#555",fontFamily:"'JetBrains Mono',monospace",marginTop:3}}>km/h</div>
           </div>
         </div>
@@ -456,6 +466,7 @@ export default function App() {
             planned={planned} done={done}
             checkIn={checkIn} setCheckIn={setCheckIn} checkInSaved={checkInSaved}
             onSaveCheckIn={onSaveCheckIn}
+            recentCheckins={recentCheckins}
             weekCompare={weekCompare} protectionScore={protectionScore} weeklyVol={weeklyVol}
             todayPlanned={todayPlanned} upcoming={upcoming}
             logSession={logSession}
@@ -549,7 +560,7 @@ export default function App() {
       {/* ── MODALS PLAN / LOG / EDIT / EDIT PLANNED ── */}
       {modal&&(
         <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(6px)"}}>
-          <div onClick={e=>e.stopPropagation()} className="pop" style={{background:"#0F1117",border:"1px solid #1C1F27",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))`}}>
+          <div onClick={e=>e.stopPropagation()} className="pop" style={{background:"#242426",borderRadius:"20px 20px 0 0",padding:28,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",paddingBottom:`calc(28px + env(safe-area-inset-bottom, 12px))`}}>
 
             {modal.type==="editPlanned"&&modal.session&&(
               <EditPlannedModal
@@ -560,9 +571,9 @@ export default function App() {
             )}
 
             {modal.type==="plan"&&(<>
-              <div style={{fontSize:22,fontWeight:800,marginBottom:24}}>Planifier une séance</div>
+              <div style={{fontSize:22,fontWeight:800,color:"#fff",marginBottom:24}}>Planifier une séance</div>
               <div style={{marginBottom:16}}>
-                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE</div>
+                <div style={{fontSize:9,color:"#555",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:10}}>TYPE</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {Object.entries(TYPE_META).map(([type,tm])=>(
                     <button key={type} className="type-btn" onClick={()=>setPlanForm({...planForm,type})}
@@ -581,15 +592,15 @@ export default function App() {
                 <Field label="NOTES" full><textarea className="inp" rows={3} placeholder="Description..." value={planForm.notes} onChange={e=>setPlanForm({...planForm,notes:e.target.value})} style={{resize:"none"}}/></Field>
               </FormGrid>
               <div style={{display:"flex",gap:10,marginTop:24}}>
-                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
-                <button className="btn-primary" onClick={addPlanned} style={{flex:2,background:"#E8E4DC",color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>ENREGISTRER</button>
+                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,padding:14,fontSize:12}}>ANNULER</button>
+                <button onClick={addPlanned} style={{flex:2,background:"#fff",color:"#000",border:"none",borderRadius:50,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>ENREGISTRER</button>
               </div>
             </>)}
 
             {modal.type==="log"&&(<>
-              <div style={{fontSize:22,fontWeight:800,marginBottom:24}}>Enregistrer une séance</div>
+              <div style={{fontSize:22,fontWeight:800,color:"#fff",marginBottom:24}}>Enregistrer une séance</div>
               <div style={{marginBottom:16}}>
-                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE</div>
+                <div style={{fontSize:9,color:"#555",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:10}}>TYPE</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {Object.entries(TYPE_META).map(([type,tm])=>(
                     <button key={type} className="type-btn" onClick={()=>setLogForm({...logForm,type})}
@@ -606,19 +617,18 @@ export default function App() {
                 <Field label="DURÉE TOTALE (min)"><input type="number" className="inp" placeholder="68" value={logForm.dur} onChange={e=>setLogForm({...logForm,dur:e.target.value})}/></Field>
               </FormGrid>
               {logForm.type==="Évaluation VMA"&&(
-                <div style={{padding:"12px 14px",background:"#001f2b",border:"1px solid #00D2FF33",borderRadius:10,marginBottom:16}}>
-                  <div style={{fontSize:10,color:"#00D2FF",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:8}}>⚡ TEST 6 MIN — DONNÉES PRÉCISES</div>
-                  <div style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace",marginBottom:10,lineHeight:1.6}}>
-                    Indique la distance couverte <span style={{color:"#E8E4DC"}}>uniquement pendant les 6 minutes</span> à fond (sans l'échauffement ni le retour au calme). C'est ce chiffre qui sera utilisé pour calculer ta VMA.
+                <div style={{padding:"12px 14px",background:"#0A84FF11",borderRadius:10,marginBottom:16}}>
+                  <div style={{fontSize:10,color:"#0A84FF",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:600,marginBottom:8}}>⚡ TEST 6 MIN — DONNÉES PRÉCISES</div>
+                  <div style={{fontSize:11,color:"#888",fontFamily:"'Inter',sans-serif",marginBottom:10,lineHeight:1.6}}>
+                    Indique la distance couverte <span style={{color:"#fff"}}>uniquement pendant les 6 minutes</span> à fond (sans l'échauffement ni le retour au calme). C'est ce chiffre qui sera utilisé pour calculer ta VMA.
                   </div>
                   <Field label="DISTANCE 6 MIN PURES (km)" full>
                     <input type="number" className="inp" placeholder="ex: 1.85" step="0.01"
                       value={logForm.vma6minDist||""}
-                      onChange={e=>setLogForm({...logForm,vma6minDist:e.target.value})}
-                      style={{borderColor:"#00D2FF44"}}/>
+                      onChange={e=>setLogForm({...logForm,vma6minDist:e.target.value})}/>
                   </Field>
                   {logForm.vma6minDist&&parseFloat(logForm.vma6minDist)>0&&(
-                    <div style={{marginTop:8,fontSize:12,fontFamily:"'JetBrains Mono',monospace",color:"#00D2FF"}}>
+                    <div style={{marginTop:8,fontSize:12,fontFamily:"'JetBrains Mono',monospace",color:"#0A84FF"}}>
                       → VMA estimée : <span style={{fontWeight:700,fontSize:16}}>{(parseFloat(logForm.vma6minDist)/6*60*1.05).toFixed(2)} km/h</span>
                     </div>
                   )}
@@ -628,7 +638,7 @@ export default function App() {
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" placeholder="145" value={logForm.hr} onChange={e=>setLogForm({...logForm,hr:e.target.value})}/></Field>
                 <Field label={`RPE · ${logForm.rpe}/10`} full>
                   <input type="range" min="1" max="10" value={logForm.rpe} onChange={e=>setLogForm({...logForm,rpe:e.target.value})} style={{width:"100%",accentColor:"#FFE66D"}}/>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#444",fontFamily:"'JetBrains Mono',monospace",marginTop:4}}><span>LÉGER</span><span>MODÉRÉ</span><span>MAX</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#444",fontFamily:"'Inter',sans-serif",marginTop:4}}><span>LÉGER</span><span>MODÉRÉ</span><span>MAX</span></div>
                 </Field>
                 <Field label="RESSENTI" full>
                   <div style={{display:"flex",gap:8,justifyContent:"center"}}>
@@ -638,18 +648,18 @@ export default function App() {
                 <Field label="NOTES" full><textarea className="inp" rows={2} placeholder="Ressenti, conditions..." value={logForm.notes} onChange={e=>setLogForm({...logForm,notes:e.target.value})} style={{resize:"none"}}/></Field>
               </FormGrid>
               <div style={{display:"flex",gap:10,marginTop:24}}>
-                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
-                <button className="btn-primary" onClick={submitLog} style={{flex:2,background:"#4ECDC4",color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>ENREGISTRER ✓</button>
+                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,padding:14,fontSize:12}}>ANNULER</button>
+                <button onClick={submitLog} style={{flex:2,background:"#32D74B",color:"#000",border:"none",borderRadius:50,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>ENREGISTRER ✓</button>
               </div>
             </>)}
 
             {modal.type==="edit"&&editForm&&(<>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
-                <div style={{fontSize:22,fontWeight:800}}>Modifier la séance</div>
-                <div style={{fontSize:11,color:"#555",fontFamily:"'JetBrains Mono',monospace"}}>{fmtDate(editForm.date,{day:"numeric",month:"long"})}</div>
+                <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>Modifier la séance</div>
+                <div style={{fontSize:11,color:"#555",fontFamily:"'Inter',sans-serif"}}>{fmtDate(editForm.date,{day:"numeric",month:"long"})}</div>
               </div>
               <div style={{marginBottom:16}}>
-                <div style={{fontSize:9,color:"#555",letterSpacing:2,fontFamily:"'JetBrains Mono',monospace",marginBottom:10}}>TYPE DE SÉANCE</div>
+                <div style={{fontSize:9,color:"#555",letterSpacing:1,fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:10}}>TYPE DE SÉANCE</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {Object.entries(TYPE_META).map(([type,tm])=>(
                     <button key={type} className="type-btn" onClick={()=>setEditForm({...editForm,type})}
@@ -675,8 +685,8 @@ export default function App() {
                 <Field label="NOTES" full><textarea className="inp" rows={2} value={editForm.notes||""} onChange={e=>setEditForm({...editForm,notes:e.target.value})} style={{resize:"none"}}/></Field>
               </FormGrid>
               <div style={{display:"flex",gap:10,marginTop:24}}>
-                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,borderRadius:12,padding:14,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>ANNULER</button>
-                <button className="btn-primary" onClick={submitEdit} style={{flex:2,background:"#FFE66D",color:"#080A0E",borderRadius:12,padding:14,fontSize:13,fontWeight:700}}>SAUVEGARDER ✓</button>
+                <button className="btn-ghost" onClick={()=>setModal(null)} style={{flex:1,padding:14,fontSize:12}}>ANNULER</button>
+                <button onClick={submitEdit} style={{flex:2,background:"#FFE66D",color:"#000",border:"none",borderRadius:50,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>SAUVEGARDER ✓</button>
               </div>
             </>)}
           </div>

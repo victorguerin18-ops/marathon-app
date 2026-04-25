@@ -64,16 +64,52 @@ export async function loadCheckin(date) {
   const { data, error } = await supabase.from('checkins').select('*').eq('date', date).maybeSingle();
   if (error) { console.error(error); return null; }
   if (!data) return null;
-  return { hrv: String(data.hrv || ''), recovery: String(data.recovery || ''), feeling: data.feeling, readiness: data.readiness };
+  return {
+    hrv: String(data.hrv || ''),
+    bevelRecovery: String(data.bevel_recovery || ''),
+    restingHR: String(data.resting_hr || ''),
+    sleepHours: String(data.sleep_hours || ''),
+    feelingScore: data.feeling_score ?? 3,
+    readiness: data.readiness,
+    morningBrief: data.morning_brief || null,
+    briefDate: data.brief_date || null,
+  };
 }
-export async function saveCheckin(date, hrv, recovery, feeling, readiness) {
+export async function saveCheckin(date, data) {
   const { error } = await supabase.from('checkins').upsert({
-    id: `checkin-${date}`,
-    date,
-    hrv: hrv ? parseFloat(hrv) : null,
-    recovery: recovery ? parseFloat(recovery) : null,
-    feeling,
-    readiness,
+    id: `checkin-${date}`, date,
+    hrv: data.hrv ? parseFloat(data.hrv) : null,
+    bevel_recovery: data.bevelRecovery ? parseInt(data.bevelRecovery) : null,
+    resting_hr: data.restingHR ? parseFloat(data.restingHR) : null,
+    sleep_hours: data.sleepHours ? parseFloat(data.sleepHours) : null,
+    feeling_score: data.feelingScore ?? null,
+    readiness: data.readiness,
+    morning_brief: data.morningBrief || null,
+    brief_date: data.briefDate || null,
   }, { onConflict: 'id' });
+  if (error) console.error(error);
+}
+export async function loadRecentCheckins(days = 7) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const { data, error } = await supabase.from('checkins').select('*')
+    .gte('date', cutoffStr).order('date', { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data.map(r => ({
+    date: r.date,
+    hrv: r.hrv ?? null,
+    bevelRecovery: r.bevel_recovery ?? null,
+    restingHR: r.resting_hr ?? null,
+    sleepHours: r.sleep_hours ?? null,
+    feelingScore: r.feeling_score ?? null,
+    readiness: r.readiness ?? null,
+    morningBrief: r.morning_brief || null,
+    briefDate: r.brief_date || null,
+  }));
+}
+export async function saveMorningBrief(date, brief) {
+  const { error } = await supabase.from('checkins')
+    .update({ morning_brief: brief, brief_date: date }).eq('date', date);
   if (error) console.error(error);
 }
