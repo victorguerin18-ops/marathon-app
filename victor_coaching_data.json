@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_sync": "2026-04-26T06:05:01.894Z",
+    "last_sync": "2026-04-26T15:27:54.118Z",
     "jours_avant_lille": 182,
     "semaines_avant_lille": 26
   },
@@ -11,15 +11,23 @@
   },
   "checkin_aujourd_hui": {
     "date": "2026-04-26",
-    "vfc": "",
-    "recuperation_bevel": "",
-    "fc_repos": "",
-    "sommeil_h": "",
-    "sensation": 3,
-    "readiness_score": null,
+    "vfc": "80.7",
+    "recuperation_bevel": "59",
+    "fc_repos": "51.4",
+    "sommeil_h": "7.5",
+    "sensation": 4,
+    "readiness_score": 70,
     "morning_brief": null
   },
   "historique_checkins": [
+    {
+      "date": "2026-04-26",
+      "vfc": 80.7,
+      "recuperation_bevel": 59,
+      "fc_repos": 51.4,
+      "sommeil_h": 7.5,
+      "readiness": 70
+    },
     {
       "date": "2026-04-25",
       "vfc": 87,
