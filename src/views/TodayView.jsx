@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { TYPE_META, STORE, TODAY_STR, TODAY } from '../constants';
+import { TYPE_META, STORE, TODAY_STR, TODAY, INTENSE_TYPES } from '../constants';
 import { addDays, fmtDate, wkKey, parseDate, pace } from '../utils/dates';
-import { calcReadiness, getReadinessReco, getReadinessAdvice, scoreSession } from '../utils/scores';
+import { calcReadiness, buildSmartInsight, getReadinessAdvice, scoreSession } from '../utils/scores';
 import { saveMorningBrief } from '../db';
 import CompareBar from '../components/CompareBar';
 
@@ -48,9 +48,23 @@ export default function TodayView({
     : readiness >= 85 ? "EXCELLENT" : readiness >= 65 ? "BON"
     : readiness >= 45 ? "MODÉRÉ" : "FAIBLE";
 
-  const reco = readiness !== null
-    ? getReadinessReco(readiness, checkIn.hrv, todayPlanned[0]?.type, checkIn.bevelRecovery)
+  const insight = (checkInSaved && !checkInEditing && readiness !== null)
+    ? buildSmartInsight({
+        readiness,
+        checkIn,
+        recentCheckins: recentCheckins || [],
+        todaySession: todayPlanned[0] || null,
+        done,
+        planned,
+        protectionScore,
+        acwr: protectionScore.acwr,
+        planConfig: { targetWeeklyKm: weekCompare.targetKm },
+      })
     : null;
+  const isAlertInsight = readiness !== null && (
+    readiness < 45 ||
+    (protectionScore.acwr > 1.3 && INTENSE_TYPES.includes(todayPlanned[0]?.type))
+  );
 
   /* ── Averages for brief context ── */
   const history = (recentCheckins || []).filter(c => c.date !== TODAY_STR);
@@ -150,7 +164,12 @@ Dernières séances : ${last2done.map(r=>`${r.type.split(' ')[0]} ${r.dist}km RP
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
             <div style={{ flex: 1, paddingRight: 12 }}>
               <div style={{ fontSize: 10, color: '#32D74B', letterSpacing: 2, fontFamily: "'Inter',sans-serif", fontWeight: 600, marginBottom: 4 }}>🌅 FORME DU JOUR</div>
-              {reco && <div style={{ fontSize: 11, color: '#888', fontFamily: "'Inter',sans-serif", lineHeight: 1.5 }}>{reco}</div>}
+              {insight && (
+                <div style={{ fontSize: 13, color: isAlertInsight ? '#FF9F0A' : '#ccc', fontFamily: "'Inter',sans-serif", lineHeight: 1.6 }}>
+                  {isAlertInsight && <span style={{ marginRight: 4 }}>⚠</span>}
+                  {insight}
+                </div>
+              )}
             </div>
             <div style={{ textAlign: 'center', flexShrink: 0 }}>
               <div style={{ fontSize: 44, fontWeight: 800, color: rc, letterSpacing: -2, lineHeight: 1 }}>{readiness}</div>

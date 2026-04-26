@@ -135,6 +135,118 @@ export function calcReadiness(bevelRecovery, hrv, restingHR, sleepHours, feeling
   return Math.round(Math.min(100, Math.max(0, sBevel*0.60 + sHRV*0.15 + sHR*0.10 + sSleep*0.10 + sFeel*0.05)));
 }
 
+export function buildSmartInsight({
+  readiness, checkIn, recentCheckins,
+  todaySession, done, planned,
+  protectionScore, acwr,
+  planConfig,
+}) {
+  const bevel    = parseFloat(checkIn?.bevelRecovery) || 0;
+  const vfc      = parseFloat(checkIn?.hrv) || 0;
+  const sType    = todaySession?.type || null;
+  const sDist    = todaySession?.targetDist || 0;
+  const isIntense = sType ? INTENSE_TYPES.includes(sType) : false;
+  const r        = readiness ?? 50;
+
+  // ── 1. ALERTES PRIORITAIRES ──
+  if (acwr > 1.3 && isIntense) {
+    return `ACWR à ${acwr.toFixed(2)} — surcharge détectée. ${sType} de ${sDist}km prévu mais ton corps absorbe mal. EF légère ou repos pour protéger la suite.`;
+  }
+  if (r < 45) {
+    if (isIntense) {
+      return `Récup Bevel à ${bevel}% et VFC à ${vfc}ms — fatigue profonde. Pas de séance intense aujourd'hui, ton système nerveux n'a pas récupéré.`;
+    }
+    if (sType) {
+      return `Readiness bas (${r}/100) mais ${sType} prévu est dans tes cordes. Reste en zone 2, n'accélère pas.`;
+    }
+  }
+
+  // ── 2. CONTEXTE SEMAINE ──
+  const kmFaitsSemaine = done
+    .filter(d => d.date >= addDays(TODAY_STR, -6))
+    .reduce((s, d) => s + d.dist, 0);
+  const kmCibleSemaine = planConfig?.targetWeeklyKm || 42;
+  const pctSemaine = kmCibleSemaine > 0 ? Math.round(kmFaitsSemaine / kmCibleSemaine * 100) : 0;
+  const seancesRestantes = planned.filter(p =>
+    p.date >= TODAY_STR &&
+    p.date <= addDays(TODAY_STR, 6) &&
+    !done.find(d => d.plannedId === p.id)
+  );
+  const kmRestants = seancesRestantes.reduce((s, p) => s + (p.targetDist || 0), 0);
+  const [yr, mo, dy] = TODAY_STR.split('-').map(Number);
+  const dayOfWeek = new Date(yr, mo - 1, dy).getDay();
+  const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+
+  // ── 3. DELTA VFC vs MOYENNE ──
+  const history = (recentCheckins || []).filter(c => c.date !== TODAY_STR);
+  function avg(vals) {
+    const valid = vals.filter(v => v !== null && !isNaN(v) && v > 0);
+    return valid.length >= 2 ? valid.reduce((s, v) => s + v, 0) / valid.length : null;
+  }
+  const avgVFC   = avg(history.map(c => parseFloat(c.hrv) || 0));
+  const avgBevel = avg(history.map(c => parseFloat(c.bevelRecovery) || 0));
+  const deltaVFC   = avgVFC   !== null ? Math.round(vfc   - avgVFC)   : null;
+  const deltaRecup = avgBevel !== null ? Math.round(bevel - avgBevel) : null;
+
+  // ── 4. DERNIÈRE SÉANCE ──
+  const lastSession = [...done].sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+  const joursDepuis = lastSession
+    ? Math.round((new Date(TODAY_STR + 'T12:00:00') - new Date(lastSession.date + 'T12:00:00')) / 86400000)
+    : null;
+
+  // ── 5. PATTERNS ──
+
+  // A — Bonne récup + séance intense + VFC en hausse
+  if (r >= 75 && deltaVFC !== null && deltaVFC > 3 && isIntense) {
+    const afterStr = lastSession && joursDepuis !== null
+      ? ` après ${joursDepuis === 1 ? 'hier' : `${joursDepuis}j`}`
+      : '';
+    return `VFC en hausse (+${deltaVFC}ms) — système nerveux bien récupéré${afterStr}. ${sType} de ${sDist}km : timing parfait.`;
+  }
+
+  // B — Bonne récup + séance facile
+  if (r >= 75 && sType && !isIntense) {
+    return `Forme excellente aujourd'hui (${r}/100). ${sType} de ${sDist}km prévu — profites-en pour rester en zone 2 et accumuler les km proprement.`;
+  }
+
+  // C — Récup correcte + séance intense
+  if (r >= 55 && r < 75 && isIntense) {
+    return `Récup correcte (${bevel}%) mais pas au top. ${sType} de ${sDist}km : faisable, commence prudemment et décide à l'échauffement.`;
+  }
+
+  // D — Récup correcte + volume semaine serré
+  if (r >= 55 && r < 75 && pctSemaine < 60 && daysUntilSunday <= 3 && seancesRestantes.length > 0) {
+    return `Readiness à ${r}/100. Il te reste ${kmRestants.toFixed(0)}km sur ${seancesRestantes.length} séance(s) cette semaine — rythme serré mais atteignable si tu y vas aujourd'hui.`;
+  }
+
+  // E — Récup en baisse vs moyenne
+  if (deltaRecup !== null && deltaVFC !== null && deltaRecup < -15 && deltaVFC < -5) {
+    const sessionStr = sType
+      ? `${sType} de ${sDist}km : réduis l'intensité de 20%.`
+      : 'Journée légère recommandée.';
+    return `VFC en baisse (${deltaVFC}ms vs moyenne) et récup Bevel à ${bevel}% — tendance de fatigue. ${sessionStr}`;
+  }
+
+  // G — Semaine bien avancée (avant F pour couvrir "repos + bonne semaine")
+  if (pctSemaine >= 80) {
+    const sessionStr = sType
+      ? `${sType} aujourd'hui et tu boucles la semaine proprement.`
+      : 'Reste à gérer la récup.';
+    return `Bonne semaine en cours — ${kmFaitsSemaine.toFixed(0)}km/${kmCibleSemaine}km (${pctSemaine}%). ${sessionStr}`;
+  }
+
+  // F — Aucune séance prévue
+  if (!sType) {
+    if (r >= 75) {
+      return `Jour de repos prévu — et tu es en forme (${r}/100). Profite pour récupérer activement, la prochaine séance sera meilleure.`;
+    }
+    return `Pas de séance aujourd'hui — ton corps en a besoin (${r}/100). ${seancesRestantes.length} séance(s) encore cette semaine.`;
+  }
+
+  // ── 6. FALLBACK ──
+  return `Readiness ${r}/100 — ${r >= 65 ? "forme correcte pour t'entraîner." : "écoute ton corps aujourd'hui."}`;
+}
+
 export function getReadinessReco(score, hrv, plannedType, bevelRecovery = 0) {
   const h = parseFloat(hrv) || 0;
   const b = parseFloat(bevelRecovery) || 0;
