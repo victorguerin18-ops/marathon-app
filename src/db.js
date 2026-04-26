@@ -36,6 +36,12 @@ export async function loadDone() {
     id: r.id, plannedId: r.planned_id, date: r.date, type: r.type,
     dist: r.dist, dur: r.dur, hr: r.hr, rpe: r.rpe,
     feeling: r.feeling, notes: r.notes, fromStrava: r.from_strava,
+    elevation: r.elevation ?? null,
+    cadence: r.cadence ?? null,
+    max_hr: r.max_hr ?? null,
+    suffer_score: r.suffer_score ?? null,
+    description_strava: r.description_strava || null,
+    splits: r.splits || [],
   }));
 }
 export async function saveDone(r) {
@@ -43,6 +49,12 @@ export async function saveDone(r) {
     id: r.id, planned_id: r.plannedId || null, date: r.date, type: r.type,
     dist: r.dist, dur: r.dur, hr: r.hr || null, rpe: r.rpe,
     feeling: r.feeling || 3, notes: r.notes || '', from_strava: r.fromStrava || false,
+    elevation: r.elevation ?? null,
+    cadence: r.cadence ?? null,
+    max_hr: r.max_hr ?? null,
+    suffer_score: r.suffer_score ?? null,
+    description_strava: r.description_strava || null,
+    splits: r.splits?.length ? r.splits : null,
   });
   if (error) console.error(error);
 }
@@ -51,6 +63,12 @@ export async function saveManyDone(runs) {
     id: r.id, planned_id: r.plannedId || null, date: r.date, type: r.type,
     dist: r.dist, dur: r.dur, hr: r.hr || null, rpe: r.rpe,
     feeling: r.feeling || 3, notes: r.notes || '', from_strava: r.fromStrava || false,
+    elevation: r.elevation ?? null,
+    cadence: r.cadence ?? null,
+    max_hr: r.max_hr ?? null,
+    suffer_score: r.suffer_score ?? null,
+    description_strava: r.description_strava || null,
+    splits: r.splits?.length ? r.splits : null,
   }));
   const { error } = await supabase.from('done').upsert(rows, { onConflict: 'id' });
   if (error) console.error(error);

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities, getValidToken } from './strava';
+import { syncToGitHub } from './sync';
 import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin, loadRecentCheckins } from './db';
 import { PlanWizard, generatePlanFromConfig, defaultConfig } from './PlanWizard';
 import { VMA_DEFAULT, STORE, TODAY_STR, TYPE_META, FEELINGS } from './constants';
@@ -47,6 +48,8 @@ export default function App() {
   const [debriefForm,        setDebriefForm]        = useState({rpe:"6", feeling:"3", notes:""});
 
   const [readinessAction, setReadinessAction] = useState(()=>STORE.get('readiness_action_'+TODAY_STR, null));
+  const [githubSyncing,   setGithubSyncing]   = useState(false);
+  const [githubSyncMsg,   setGithubSyncMsg]   = useState("");
 
   const [planForm, setPlanForm] = useState({date:TODAY_STR,type:"Endurance fondamentale",targetDist:"",targetDur:"",targetHR:"",notes:""});
   const [logForm,  setLogForm]  = useState({date:TODAY_STR,plannedId:"",type:"Endurance fondamentale",dist:"",dur:"",hr:"",rpe:"6",feeling:"3",notes:""});
@@ -113,12 +116,26 @@ export default function App() {
     if (!existing) return { ...incoming, plannedId: autoPlannedId };
     return {
       ...incoming,
-      type:      existing.type,
-      rpe:       existing.rpe,
-      feeling:   existing.feeling,
-      notes:     existing.notes ?? incoming.notes,
-      plannedId: existing.plannedId || autoPlannedId,
+      type:               existing.type,
+      rpe:                existing.rpe,
+      feeling:            existing.feeling,
+      notes:              existing.notes ?? incoming.notes,
+      plannedId:          existing.plannedId || autoPlannedId,
+      description_strava: existing.description_strava || incoming.description_strava,
     };
+  }
+
+  async function handleGithubSync() {
+    setGithubSyncing(true);
+    setGithubSyncMsg("");
+    try {
+      await syncToGitHub({ done, planned, checkIn, recentCheckins, planConfig });
+      setGithubSyncMsg("✓ Synced");
+    } catch (e) {
+      setGithubSyncMsg("✗ Erreur");
+    }
+    setGithubSyncing(false);
+    setTimeout(() => setGithubSyncMsg(""), 3000);
   }
 
   async function syncStrava(){
@@ -458,6 +475,21 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* ── SYNC COACH BUTTON ── */}
+      {view === "today" && (
+        <div style={{padding:"8px 20px 0",display:"flex",justifyContent:"flex-end"}}>
+          <button
+            className="btn-ghost"
+            onClick={handleGithubSync}
+            disabled={githubSyncing}
+            style={{opacity:githubSyncing?0.6:1,display:"flex",alignItems:"center",gap:6}}>
+            {githubSyncing
+              ? <><span className="spin">↻</span> Sync...</>
+              : githubSyncMsg || "⟳ Sync Coach"}
+          </button>
+        </div>
+      )}
 
       {/* ── VIEWS ── */}
       <div style={{padding:"20px 20px 0"}}>
