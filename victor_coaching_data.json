@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_sync": "2026-04-26T15:27:54.118Z",
+    "last_sync": "2026-04-26T16:22:23.879Z",
     "jours_avant_lille": 182,
     "semaines_avant_lille": 26
   },
@@ -17,7 +17,7 @@
     "sommeil_h": "7.5",
     "sensation": 4,
     "readiness_score": 70,
-    "morning_brief": null
+    "morning_brief": "1. RÉCUP : Les données de cette nuit montrent une récupération à 59%, ce qui indique que ton corps n'est pas encore pleinement récupéré de tes précédentes séances. Il est important de prendre cela en compte pour la séance d'aujourd'hui.\n2. SÉANCE : Pour la séance d'endurance fondamentale de 10,5km, je conseille de maintenir un rythme constant et de faire attention à tes sensations corporelles, en particulier en raison de la récupération incomplète. Il est essentiel de ne pas dépasser ton seuil de fatigue.\n3. ALERTE : Aucune valeur n'est hors norme, mais il est important de surveiller ton rythme cardiaque au repos et ta sensation générale pour éviter toute surcharge et prévenir les blessures, compte tenu du score de protection blessure à 70/100."
   },
   "historique_checkins": [
     {
