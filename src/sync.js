@@ -83,31 +83,35 @@ export async function syncToGitHub({ done, planned, checkIn, recentCheckins, pla
   };
 
   const TOKEN = process.env.REACT_APP_GITHUB_TOKEN;
+  console.log('[sync] token présent :', !!TOKEN, '— longueur :', TOKEN?.length);
+
   const headers = {
     Authorization: `Bearer ${TOKEN}`,
     'Content-Type': 'application/json',
     Accept: 'application/vnd.github+json',
   };
 
+  // Récupère le SHA si le fichier existe déjà (404 = premier upload, sha reste null)
   let sha = null;
-  try {
-    const existing = await fetch(API, { headers });
-    if (existing.ok) {
-      const data = await existing.json();
-      sha = data.sha;
-    }
-  } catch (_) {}
+  const getRes = await fetch(API, { headers });
+  if (getRes.ok) {
+    const existing = await getRes.json();
+    sha = existing.sha;
+    console.log('[sync] fichier existant, sha :', sha?.slice(0, 8));
+  } else if (getRes.status === 404) {
+    console.log('[sync] fichier absent — premier upload');
+  } else {
+    const errGet = await getRes.json();
+    throw new Error(`GET sha échoué (${getRes.status}) : ${errGet.message}`);
+  }
 
-  const body = {
-    message: 'sync coaching data',
-    content: toBase64(JSON.stringify(json, null, 2)),
-    ...(sha ? { sha } : {}),
-  };
+  const body = { message: 'sync coaching data', content: toBase64(JSON.stringify(json, null, 2)) };
+  if (sha) body.sha = sha;
 
   const res = await fetch(API, { method: 'PUT', headers, body: JSON.stringify(body) });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.message || 'GitHub sync failed');
+    throw new Error(`PUT échoué (${res.status}) : ${err.message}`);
   }
   return json;
 }
