@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_sync": "2026-04-26T16:22:23.879Z",
-    "jours_avant_lille": 182,
+    "last_sync": "2026-05-02T20:22:35.512Z",
+    "jours_avant_lille": 176,
     "semaines_avant_lille": 26
   },
   "profil": {
@@ -10,16 +10,24 @@
     "objectif_temps": "3:30:00"
   },
   "checkin_aujourd_hui": {
-    "date": "2026-04-26",
-    "vfc": "80.7",
-    "recuperation_bevel": "59",
-    "fc_repos": "51.4",
-    "sommeil_h": "7.5",
-    "sensation": 4,
-    "readiness_score": 70,
-    "morning_brief": "1. RÉCUP : Les données de cette nuit montrent une récupération à 59%, ce qui indique que ton corps n'est pas encore pleinement récupéré de tes précédentes séances. Il est important de prendre cela en compte pour la séance d'aujourd'hui.\n2. SÉANCE : Pour la séance d'endurance fondamentale de 10,5km, je conseille de maintenir un rythme constant et de faire attention à tes sensations corporelles, en particulier en raison de la récupération incomplète. Il est essentiel de ne pas dépasser ton seuil de fatigue.\n3. ALERTE : Aucune valeur n'est hors norme, mais il est important de surveiller ton rythme cardiaque au repos et ta sensation générale pour éviter toute surcharge et prévenir les blessures, compte tenu du score de protection blessure à 70/100."
+    "date": "2026-05-02",
+    "vfc": "",
+    "recuperation_bevel": "",
+    "fc_repos": "",
+    "sommeil_h": "",
+    "sensation": 3,
+    "readiness_score": null,
+    "morning_brief": null
   },
   "historique_checkins": [
+    {
+      "date": "2026-04-27",
+      "vfc": 90,
+      "recuperation_bevel": 77,
+      "fc_repos": 48.6,
+      "sommeil_h": 8.5,
+      "readiness": 83
+    },
     {
       "date": "2026-04-26",
       "vfc": 80.7,
@@ -43,17 +51,47 @@
       "fc_repos": null,
       "sommeil_h": null,
       "readiness": 93
-    },
-    {
-      "date": "2026-04-22",
-      "vfc": 96,
-      "recuperation_bevel": null,
-      "fc_repos": null,
-      "sommeil_h": null,
-      "readiness": 82
     }
   ],
   "seances": [
+    {
+      "date": "2026-04-30",
+      "type": "Fractionné / VMA",
+      "source": "both",
+      "distance_km": 11.7,
+      "duree_min": 61,
+      "allure_moy": "5:13",
+      "bpm_moy": 165,
+      "bpm_max": 193,
+      "cadence": null,
+      "denivele_m": 89.2,
+      "suffer_score": null,
+      "rpe": 8,
+      "feeling": 3,
+      "notes_app": "Course à pied le matin",
+      "description_strava": "Course à pied le matin",
+      "splits": [],
+      "planned_dist": 8.7
+    },
+    {
+      "date": "2026-04-28",
+      "type": "Endurance fondamentale",
+      "source": "both",
+      "distance_km": 8.1,
+      "duree_min": 49,
+      "allure_moy": "6:03",
+      "bpm_moy": 154,
+      "bpm_max": 163,
+      "cadence": null,
+      "denivele_m": 71,
+      "suffer_score": null,
+      "rpe": 7,
+      "feeling": 3,
+      "notes_app": "Course à pied en soirée",
+      "description_strava": "Course à pied en soirée",
+      "splits": [],
+      "planned_dist": 10.5
+    },
     {
       "date": "2026-04-25",
       "type": "Sortie longue",
@@ -873,10 +911,11 @@
     }
   ],
   "semaine_en_cours": {
-    "volume_km": "22.4",
-    "nb_seances": 2,
+    "volume_km": "35.0",
+    "nb_seances": 3,
     "repartition": {
       "Sortie longue": 1,
+      "Fractionné / VMA": 1,
       "Endurance fondamentale": 1
     }
   }
