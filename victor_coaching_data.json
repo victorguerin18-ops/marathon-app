@@ -1,8 +1,8 @@
 {
   "meta": {
-    "last_sync": "2026-05-02T20:22:35.512Z",
-    "jours_avant_lille": 176,
-    "semaines_avant_lille": 26
+    "last_sync": "2026-05-03T18:35:34.189Z",
+    "jours_avant_lille": 175,
+    "semaines_avant_lille": 25
   },
   "profil": {
     "vma": 15.24,
@@ -10,7 +10,7 @@
     "objectif_temps": "3:30:00"
   },
   "checkin_aujourd_hui": {
-    "date": "2026-05-02",
+    "date": "2026-05-03",
     "vfc": "",
     "recuperation_bevel": "",
     "fc_repos": "",
@@ -43,17 +43,28 @@
       "fc_repos": 50.7,
       "sommeil_h": 8,
       "readiness": 79
-    },
-    {
-      "date": "2026-04-24",
-      "vfc": 93,
-      "recuperation_bevel": null,
-      "fc_repos": null,
-      "sommeil_h": null,
-      "readiness": 93
     }
   ],
   "seances": [
+    {
+      "date": "2026-05-03",
+      "type": "Sortie longue",
+      "source": "both",
+      "distance_km": 11.7,
+      "duree_min": 76,
+      "allure_moy": "6:30",
+      "bpm_moy": 147,
+      "bpm_max": 157,
+      "cadence": null,
+      "denivele_m": 119.4,
+      "suffer_score": null,
+      "rpe": 6,
+      "feeling": 3,
+      "notes_app": "Course à pied le midi",
+      "description_strava": "Course à pied le midi",
+      "splits": [],
+      "planned_dist": 11.8
+    },
     {
       "date": "2026-04-30",
       "type": "Fractionné / VMA",
@@ -911,12 +922,12 @@
     }
   ],
   "semaine_en_cours": {
-    "volume_km": "35.0",
+    "volume_km": "31.5",
     "nb_seances": 3,
     "repartition": {
-      "Sortie longue": 1,
       "Fractionné / VMA": 1,
-      "Endurance fondamentale": 1
+      "Endurance fondamentale": 1,
+      "Sortie longue": 1
     }
   }
 }
