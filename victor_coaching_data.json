@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_sync": "2026-05-03T18:35:34.189Z",
-    "jours_avant_lille": 175,
+    "last_sync": "2026-05-05T03:02:25.919Z",
+    "jours_avant_lille": 173,
     "semaines_avant_lille": 25
   },
   "profil": {
@@ -10,7 +10,7 @@
     "objectif_temps": "3:30:00"
   },
   "checkin_aujourd_hui": {
-    "date": "2026-05-03",
+    "date": "2026-05-04",
     "vfc": "",
     "recuperation_bevel": "",
     "fc_repos": "",
@@ -27,22 +27,6 @@
       "fc_repos": 48.6,
       "sommeil_h": 8.5,
       "readiness": 83
-    },
-    {
-      "date": "2026-04-26",
-      "vfc": 80.7,
-      "recuperation_bevel": 59,
-      "fc_repos": 51.4,
-      "sommeil_h": 7.5,
-      "readiness": 70
-    },
-    {
-      "date": "2026-04-25",
-      "vfc": 87,
-      "recuperation_bevel": 72,
-      "fc_repos": 50.7,
-      "sommeil_h": 8,
-      "readiness": 79
     }
   ],
   "seances": [
@@ -925,9 +909,9 @@
     "volume_km": "31.5",
     "nb_seances": 3,
     "repartition": {
+      "Sortie longue": 1,
       "Fractionné / VMA": 1,
-      "Endurance fondamentale": 1,
-      "Sortie longue": 1
+      "Endurance fondamentale": 1
     }
   }
 }
