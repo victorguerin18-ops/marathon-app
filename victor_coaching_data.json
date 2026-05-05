@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_sync": "2026-05-05T03:02:25.919Z",
+    "last_sync": "2026-05-05T17:53:58.838Z",
     "jours_avant_lille": 173,
     "semaines_avant_lille": 25
   },
@@ -10,16 +10,24 @@
     "objectif_temps": "3:30:00"
   },
   "checkin_aujourd_hui": {
-    "date": "2026-05-04",
-    "vfc": "",
-    "recuperation_bevel": "",
-    "fc_repos": "",
-    "sommeil_h": "",
+    "date": "2026-05-05",
+    "vfc": "76",
+    "recuperation_bevel": "66",
+    "fc_repos": "46",
+    "sommeil_h": "95",
     "sensation": 3,
-    "readiness_score": null,
-    "morning_brief": null
+    "readiness_score": 74,
+    "morning_brief": "1. RÉCUP : Les données montrent une récupération à 66%, ce qui est un peu en dessous de la moyenne, mais le score de readiness est à 74/100, indiquant une condition physique globale bonne. La fréquence cardiaque au repos est à 46bpm, ce qui est un bon signe.\n2. SÉANCE : Pour la séance d'endurance fondamentale de 10,5km, je conseille de partir à un rythme modéré, car la protection blessure est à 53/100, ce qui nécessite une certaine vigilance. Il faudra écouter son corps et adapter l'intensité en conséquence.\n3. ALERTE : Aucune donnée n'est hors norme pour le moment, il n'y a donc pas d'alerte particulière, mais il faudra continuer à surveiller la protection blessure pour éviter tout risque."
   },
   "historique_checkins": [
+    {
+      "date": "2026-05-05",
+      "vfc": 76,
+      "recuperation_bevel": 66,
+      "fc_repos": 46,
+      "sommeil_h": 95,
+      "readiness": 74
+    },
     {
       "date": "2026-04-27",
       "vfc": 90,
@@ -30,6 +38,25 @@
     }
   ],
   "seances": [
+    {
+      "date": "2026-05-05",
+      "type": "Endurance fondamentale",
+      "source": "both",
+      "distance_km": 9,
+      "duree_min": 53,
+      "allure_moy": "5:53",
+      "bpm_moy": 144,
+      "bpm_max": 156,
+      "cadence": null,
+      "denivele_m": 112.2,
+      "suffer_score": null,
+      "rpe": 3,
+      "feeling": 4,
+      "notes_app": "Grosse pause au milieu pour show moto ",
+      "description_strava": "Course à pied le midi",
+      "splits": [],
+      "planned_dist": 10.5
+    },
     {
       "date": "2026-05-03",
       "type": "Sortie longue",
@@ -906,12 +933,12 @@
     }
   ],
   "semaine_en_cours": {
-    "volume_km": "31.5",
-    "nb_seances": 3,
+    "volume_km": "40.5",
+    "nb_seances": 4,
     "repartition": {
       "Sortie longue": 1,
       "Fractionné / VMA": 1,
-      "Endurance fondamentale": 1
+      "Endurance fondamentale": 2
     }
   }
 }
