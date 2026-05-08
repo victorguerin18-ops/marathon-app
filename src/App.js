@@ -340,12 +340,12 @@ export default function App() {
   }
 
   function openEdit(r){
-    setEditForm({...r,dist:String(r.dist),dur:String(r.dur),hr:r.hr?String(r.hr):"",cadence:r.cadence?String(Math.round(r.cadence)):"",rpe:String(r.rpe||6),feeling:String(r.feeling||3)});
+    setEditForm({...r,dist:String(r.dist),dur:String(r.dur),hr:r.hr?String(r.hr):"",cadence:r.cadence?String(Math.round(r.cadence)):"",elevation:r.elevation?String(Math.round(r.elevation)):"",rpe:String(r.rpe||6),feeling:String(r.feeling||3)});
     setModal({type:"edit"});
   }
 
   async function submitEdit(){
-    const u={...editForm,dist:+editForm.dist,dur:+editForm.dur,hr:editForm.hr?+editForm.hr:null,cadence:editForm.cadence?Math.round(+editForm.cadence):null,rpe:+editForm.rpe,feeling:+editForm.feeling};
+    const u={...editForm,dist:+editForm.dist,dur:+editForm.dur,hr:editForm.hr?+editForm.hr:null,cadence:editForm.cadence?Math.round(+editForm.cadence):null,elevation:editForm.elevation?Math.round(+editForm.elevation):null,rpe:+editForm.rpe,feeling:+editForm.feeling};
     await saveDone(u); setDone(prev=>prev.map(r=>r.id===u.id?u:r)); setModal(null);
   }
 
@@ -738,6 +738,7 @@ export default function App() {
                 <Field label="DURÉE (min)"><input type="number" className="inp" value={editForm.dur} onChange={e=>setEditForm({...editForm,dur:e.target.value})}/></Field>
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" value={editForm.hr||""} onChange={e=>setEditForm({...editForm,hr:e.target.value})}/></Field>
                 <Field label="CADENCE (spm)"><input type="number" className="inp" placeholder="172" value={editForm.cadence||""} onChange={e=>setEditForm({...editForm,cadence:e.target.value})}/></Field>
+                <Field label="DÉNIVELÉ (m)"><input type="number" className="inp" placeholder="120" value={editForm.elevation||""} onChange={e=>setEditForm({...editForm,elevation:e.target.value})}/></Field>
                 <Field label={`RPE · ${editForm.rpe}/10`}>
                   <input type="range" min="1" max="10" value={editForm.rpe} onChange={e=>setEditForm({...editForm,rpe:e.target.value})} style={{width:"100%",accentColor:"#FFE66D",marginTop:8}}/>
                 </Field>

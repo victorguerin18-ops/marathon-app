@@ -211,10 +211,10 @@ export function generateClaudePrompt({ done, planned, checkIn, recentCheckins, p
 
   if (recent.length > 0) {
     L.push('━━ SÉANCES (6 dernières semaines) ━━');
-    L.push('Date         Type           Km    Dur  Allure      BPM  Cad  RPE  Feeling');
+    L.push('Date         Type           Km    Dur  Allure      BPM  Cad  D+m  RPE  Feeling');
     recent.forEach(s => {
       L.push(
-        `${s.date}  ${pad(TYPE_SHORT[s.type] || s.type, 14)} ${pad(s.dist, 5)} ${pad(s.dur, 4)} ${pad(fmtAllure(s.dist, s.dur), 11)} ${pad(s.hr || '—', 4)} ${pad(s.cadence || '—', 4)} ${pad(s.rpe || '—', 4)} ${FEELING_LABELS[s.feeling] || '—'}`
+        `${s.date}  ${pad(TYPE_SHORT[s.type] || s.type, 14)} ${pad(s.dist, 5)} ${pad(s.dur, 4)} ${pad(fmtAllure(s.dist, s.dur), 11)} ${pad(s.hr || '—', 4)} ${pad(s.cadence || '—', 4)} ${pad(s.elevation != null ? Math.round(s.elevation) : '—', 5)} ${pad(s.rpe || '—', 4)} ${FEELING_LABELS[s.feeling] || '—'}`
       );
     });
     L.push('');

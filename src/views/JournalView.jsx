@@ -59,6 +59,9 @@ export default function JournalView({
                     (r.fromStrava || r.cadence != null)
                       ? `${r.cadence != null ? Math.round(r.cadence) : '—'} spm`
                       : null,
+                    (r.fromStrava || r.elevation != null)
+                      ? `${r.elevation != null ? Math.round(r.elevation) : '—'} m D+`
+                      : null,
                   ].filter(Boolean).map(v=>(
                     <span key={v} style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
                   ))}
