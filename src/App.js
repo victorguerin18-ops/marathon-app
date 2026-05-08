@@ -51,6 +51,8 @@ export default function App() {
   const [githubSyncing,   setGithubSyncing]   = useState(false);
   const [githubSyncMsg,   setGithubSyncMsg]   = useState("");
   const [clipStatus,      setClipStatus]      = useState("");
+  const [syncConflicts,   setSyncConflicts]   = useState([]);
+  const [conflictChoices, setConflictChoices] = useState({});
 
   const [planForm, setPlanForm] = useState({date:TODAY_STR,type:"Endurance fondamentale",targetDist:"",targetDur:"",targetHR:"",notes:""});
   const [logForm,  setLogForm]  = useState({date:TODAY_STR,plannedId:"",type:"Endurance fondamentale",dist:"",dur:"",hr:"",rpe:"6",feeling:"3",notes:""});
@@ -126,7 +128,11 @@ export default function App() {
       );
       return match?.id || null;
     })();
-    if (!existing) return { ...incoming, plannedId: autoPlannedId };
+    if (!existing) {
+      // Pour les nouvelles activités : type du plan si dispo, sinon guessType
+      const plannedType = autoPlannedId ? pList.find(p => p.id === autoPlannedId)?.type : null;
+      return { ...incoming, type: plannedType || incoming.type, plannedId: autoPlannedId };
+    }
     return {
       ...incoming,
       type:               existing.type,
@@ -135,7 +141,47 @@ export default function App() {
       notes:              existing.notes ?? incoming.notes,
       plannedId:          existing.plannedId || autoPlannedId,
       description_strava: existing.description_strava || incoming.description_strava,
+      // Saisies manuelles prioritaires sur les valeurs Strava
+      cadence:   existing.cadence   ?? incoming.cadence,
+      elevation: existing.elevation ?? incoming.elevation,
+      max_hr:    existing.max_hr    ?? incoming.max_hr,
     };
+  }
+
+  function detectSyncConflicts(activities, existingMap) {
+    const conflicts = [];
+    const FIELDS = [
+      { field: 'elevation', label: 'Dénivelé',  unit: 'm',   threshold: 10 },
+      { field: 'cadence',   label: 'Cadence',   unit: 'spm', threshold: 2  },
+    ];
+    activities.forEach(a => {
+      const ex = existingMap.get(a.id);
+      if (!ex) return;
+      FIELDS.forEach(({ field, label, unit, threshold }) => {
+        if (ex[field] != null && a[field] != null && Math.abs(ex[field] - a[field]) > threshold) {
+          conflicts.push({
+            key: `${a.id}-${field}`,
+            id: a.id, date: ex.date, type: ex.type,
+            field, label, unit,
+            existingVal: Math.round(ex[field]),
+            stravaVal:   Math.round(a[field]),
+          });
+        }
+      });
+    });
+    return conflicts;
+  }
+
+  async function resolveSyncConflicts() {
+    const stravaChoices = syncConflicts.filter(c => conflictChoices[c.key] === 'strava');
+    if (stravaChoices.length > 0) {
+      const byId = {};
+      stravaChoices.forEach(c => { if (!byId[c.id]) byId[c.id] = {}; byId[c.id][c.field] = c.stravaVal; });
+      await Promise.all(Object.entries(byId).map(([id, fields]) => patchDoneFields([{ id, ...fields }])));
+      setDone(prev => prev.map(r => byId[r.id] ? { ...r, ...byId[r.id] } : r));
+    }
+    setSyncConflicts([]);
+    setConflictChoices({});
   }
 
   async function handleClaudeClip() {
@@ -173,11 +219,13 @@ export default function App() {
     }
     const activities=await fetchActivities();
     const existingMap=new Map(done.map(r=>[r.id,r]));
+    const conflicts=detectSyncConflicts(activities, existingMap);
     const toSave=activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id)));
     const newCount=toSave.filter(a=>!existingMap.has(a.id)).length;
     if(toSave.length>0){await saveManyDone(toSave); setDone(prev=>{const m=new Map(prev.map(r=>[r.id,r])); toSave.forEach(a=>m.set(a.id,a)); const updated=Array.from(m.values()); checkForTodayStravaDebrief(updated, planned); return updated;});}
-    setSyncStatus(`✓ ${newCount} nouvelles · ${toSave.length-newCount} mises à jour`);
-    setTimeout(()=>setSyncStatus(""),3000); setStravaLoading(false);
+    if(conflicts.length>0){ setSyncConflicts(conflicts); setConflictChoices(Object.fromEntries(conflicts.map(c=>[c.key,'existing']))); }
+    setSyncStatus(`✓ ${newCount} nouvelles · ${toSave.length-newCount} mises à jour${conflicts.length>0?` · ${conflicts.length} conflit(s)`:''}`);
+    setTimeout(()=>setSyncStatus(""),4000); setStravaLoading(false);
   }
 
   function checkForTodayStravaDebrief(doneList, plannedList) {
@@ -584,6 +632,42 @@ export default function App() {
           onClose={()=>setStravaDebriefModal(null)}
           onSubmit={submitDebrief}
         />
+      )}
+
+      {/* ── MODAL CONFLITS SYNC ── */}
+      {syncConflicts.length>0&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:350,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
+          <div className="pop" style={{width:"100%",maxWidth:480,background:"#242426",borderRadius:"22px 22px 0 0",padding:"28px 24px",paddingBottom:"calc(28px + env(safe-area-inset-bottom,12px))",maxHeight:"80vh",overflowY:"auto"}}>
+            <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>Conflits de données</div>
+            <div style={{fontSize:11,color:"#888",fontFamily:"'Inter',sans-serif",marginBottom:20,lineHeight:1.6}}>
+              Strava a des valeurs différentes de tes saisies manuelles. Quelle valeur conserver ?
+            </div>
+            {syncConflicts.map(c=>(
+              <div key={c.key} style={{background:"#333",borderRadius:14,padding:"14px 16px",marginBottom:10}}>
+                <div style={{fontSize:10,color:"#555",fontFamily:"'Inter',sans-serif",marginBottom:8}}>
+                  {c.date} · {c.type}
+                </div>
+                <div style={{fontSize:10,color:"#888",fontWeight:600,letterSpacing:1,fontFamily:"'Inter',sans-serif",marginBottom:10}}>{c.label.toUpperCase()}</div>
+                <div style={{display:"flex",gap:8}}>
+                  {[{key:'existing',label:'MA SAISIE',val:c.existingVal,col:'#0A84FF'},{key:'strava',label:'STRAVA GPS',val:c.stravaVal,col:'#FC4C02'}].map(opt=>{
+                    const sel=conflictChoices[c.key]===opt.key;
+                    return(
+                      <button key={opt.key} onClick={()=>setConflictChoices(p=>({...p,[c.key]:opt.key}))}
+                        style={{flex:1,background:sel?`${opt.col}22`:'#2C2C2E',border:`1px solid ${sel?opt.col:'transparent'}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",fontFamily:"'Inter',sans-serif",color:sel?opt.col:'#555',transition:"all .15s",textAlign:"center"}}>
+                        <div style={{fontSize:9,fontWeight:600,letterSpacing:1,marginBottom:4}}>{opt.label}</div>
+                        <div style={{fontSize:18,fontWeight:800}}>{opt.val} <span style={{fontSize:10,fontWeight:400}}>{c.unit}</span></div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <button onClick={resolveSyncConflicts}
+              style={{width:"100%",background:"#fff",color:"#000",border:"none",borderRadius:50,padding:14,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",marginTop:8}}>
+              CONFIRMER
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── MODAL AJUSTEMENT SEMAINE ── */}
