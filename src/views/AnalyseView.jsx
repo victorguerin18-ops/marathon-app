@@ -6,7 +6,7 @@ import Chart from '../components/Chart';
 export default function AnalyseView({ done }) {
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
-  const [pacePeriod, setPacePeriod] = useState("all");
+  const [cadPeriod,  setCadPeriod]  = useState("all");
   const [varPeriod,  setVarPeriod]  = useState("4w");
   const [showACWRDetail, setShowACWRDetail] = useState(false);
 
@@ -28,7 +28,6 @@ export default function AnalyseView({ done }) {
     if(volMetric==='time') return `${Math.floor(v/60)}h${String(v%60).padStart(2,'0')}`;
     return `${v}`;
   }
-  function fmtPaceVal(v) { const m=Math.floor(v/60),s=Math.round(v%60); return `${m}'${String(s).padStart(2,'0')}"`; }
 
   const volumeData = useMemo(()=>{
     const sel=PERIODS.find(p=>p.key===volPeriod);
@@ -54,17 +53,16 @@ export default function AnalyseView({ done }) {
     });
   },[done,volPeriod,volMetric]);
 
-  const paceData = useMemo(()=>{
-    const sel=PERIODS.find(p=>p.key===pacePeriod);
+  const cadenceData = useMemo(()=>{
+    const sel=PERIODS.find(p=>p.key===cadPeriod);
     const cutoff=sel?.days?addDays(TODAY_STR,-sel.days):null;
     return [...done].filter(r=>{
-      if(r.type!=="Endurance fondamentale"&&r.type!=="Endurance") return false;
-      if(r.dist<5) return false;
+      if(r.cadence==null) return false;
       if(cutoff&&parseDate(r.date)<parseDate(cutoff)) return false;
       return true;
     }).sort((a,b)=>a.date.localeCompare(b.date))
-      .map(r=>({date:r.date,value:Math.round((r.dur*60)/r.dist),label:fmtDate(r.date,{day:"numeric",month:"numeric"})}));
-  },[done,pacePeriod]);
+      .map(r=>({date:r.date,value:Math.round(r.cadence),label:fmtDate(r.date,{day:"numeric",month:"numeric"}),type:r.type}));
+  },[done,cadPeriod]);
 
   const varietyData = useMemo(()=>{
     const sel=VARIETY_PERIODS.find(p=>p.key===varPeriod);
@@ -157,27 +155,50 @@ export default function AnalyseView({ done }) {
         </div>
       </div>
 
-      {/* ── ALLURE ── */}
+      {/* ── CADENCE ── */}
       <div className="card" style={{padding:20,marginBottom:14}}>
         <div style={{marginBottom:12}}>
-          <div style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:-0.3,marginBottom:2}}>Progression allure</div>
-          <div style={{fontSize:12,color:"#888",fontFamily:"'Inter',sans-serif"}}>EF &gt;5km · bas = plus rapide 🏃</div>
+          <div style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:-0.3,marginBottom:2}}>Cadence par séance</div>
+          <div style={{fontSize:12,color:"#888",fontFamily:"'Inter',sans-serif"}}>Toutes séances · spm · objectif 170–180</div>
         </div>
         <div style={{display:"flex",gap:4,marginBottom:16}}>
           {PERIODS.map(p=>(
-            <button key={p.key} className="seg-btn" onClick={()=>setPacePeriod(p.key)}
-              style={{flex:1,background:pacePeriod===p.key?"#FC4C02":"#333",color:pacePeriod===p.key?"#fff":"#555",borderRadius:10,fontWeight:pacePeriod===p.key?700:500}}>{p.label}</button>
+            <button key={p.key} className="seg-btn" onClick={()=>setCadPeriod(p.key)}
+              style={{flex:1,background:cadPeriod===p.key?"#0A84FF":"#333",color:cadPeriod===p.key?"#fff":"#555",borderRadius:10,fontWeight:cadPeriod===p.key?700:500}}>{p.label}</button>
           ))}
         </div>
-        <Chart data={paceData} color="#FC4C02" formatY={fmtPaceVal} smooth={false}/>
-        {paceData.length>=2&&(()=>{
-          const first=paceData[0].value, last=paceData[paceData.length-1].value, diff=first-last;
-          return (
-            <div style={{marginTop:14,padding:"12px",background:"#333",borderRadius:10,fontSize:11,color:diff>0?"#32D74B":"#FF9F0A",fontFamily:"'Inter',sans-serif"}}>
-              {diff>0?`✓ Gain de ${Math.floor(Math.abs(diff)/60)}'${String(Math.round(Math.abs(diff)%60)).padStart(2,'0')}" /km 🔥`:`△ Allure stable — continue à accumuler du volume en zone 2`}
+        {cadenceData.length===0
+          ? <div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#555",fontFamily:"'Inter',sans-serif"}}>
+              Aucune donnée de cadence · saisis-la manuellement dans le journal
             </div>
-          );
-        })()}
+          : <>
+              <Chart data={cadenceData} color="#0A84FF" formatY={v=>`${v}`} smooth={false}/>
+              {cadenceData.length>=1&&(()=>{
+                const vals=cadenceData.map(d=>d.value);
+                const avg=Math.round(vals.reduce((s,v)=>s+v,0)/vals.length);
+                const min=Math.min(...vals), max=Math.max(...vals);
+                const last=vals[vals.length-1];
+                const targetOk=last>=170&&last<=180;
+                return (<>
+                  <div style={{display:"flex",gap:8,marginTop:14}}>
+                    {[["DERNIÈRE",last+" spm","#fff"],["MOYENNE",avg+" spm","#888"],["MIN / MAX",`${min}–${max}`,"#555"]].map(([l,v,c])=>(
+                      <div key={l} style={{flex:1,background:"#333",borderRadius:10,padding:"10px 8px",textAlign:"center"}}>
+                        <div style={{fontSize:9,color:"#555",fontFamily:"'Inter',sans-serif",fontWeight:500,marginBottom:4}}>{l}</div>
+                        <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{marginTop:10,padding:"10px 12px",background:"#333",borderRadius:10,fontSize:11,fontFamily:"'Inter',sans-serif",color:targetOk?"#32D74B":"#FF9F0A"}}>
+                    {targetOk
+                      ? `✓ Cadence dans la zone cible (170–180 spm) 🎯`
+                      : last<170
+                        ? `△ Cadence à ${last} spm — essaie d'augmenter progressivement vers 170`
+                        : `△ Cadence à ${last} spm — au-dessus de 180, veille à rester relâché`}
+                  </div>
+                </>);
+              })()}
+            </>
+        }
       </div>
 
       {/* ── VARIÉTÉ ── */}
