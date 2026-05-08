@@ -56,7 +56,9 @@ export default function JournalView({
                     `${r.dur} min`,
                     pace(r.dist,r.dur)+"/km",
                     r.hr ? `${r.hr} bpm` : null,
-                    r.cadence ? `${Math.round(r.cadence)} spm` : null,
+                    (r.fromStrava || r.cadence != null)
+                      ? `${r.cadence != null ? Math.round(r.cadence) : '—'} spm`
+                      : null,
                   ].filter(Boolean).map(v=>(
                     <span key={v} style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
                   ))}
