@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities, getValidToken } from './strava';
 import { syncToGitHub, generateClaudePrompt } from './sync';
-import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin, loadRecentCheckins } from './db';
+import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin, loadRecentCheckins, patchDoneFields } from './db';
 import { PlanWizard, generatePlanFromConfig, defaultConfig } from './PlanWizard';
 import { VMA_DEFAULT, STORE, TODAY_STR, TYPE_META, FEELINGS } from './constants';
 import { fmtDate, wkKey, addDays, parseDate, isFuture } from './utils/dates';
@@ -69,15 +69,27 @@ export default function App() {
           const existingMap = new Map(d.map(r=>[r.id,r]));
           const toSave = activities.map(a=>mergeStravaActivity(a, existingMap.get(a.id), p));
           const newOnes = toSave.filter(a=>!existingMap.has(a.id));
+          // Patch chirurgical : uniquement les champs Strava enrichis manquants sur séances existantes
+          const cadencePatches = activities
+            .filter(a => existingMap.has(a.id) && a.cadence != null && existingMap.get(a.id)?.cadence == null)
+            .map(a => ({ id: a.id, cadence: a.cadence, elevation: a.elevation, max_hr: a.max_hr, suffer_score: a.suffer_score }));
           if(newOnes.length>0){
-            await saveManyDone(toSave);
+            await saveManyDone(newOnes);
             setDone(prev=>{
               const m=new Map(prev.map(r=>[r.id,r]));
-              toSave.forEach(a=>m.set(a.id,a));
+              newOnes.forEach(a=>m.set(a.id,a));
               const updated=Array.from(m.values());
               checkForTodayStravaDebrief(updated, p);
               return updated;
             });
+          }
+          if(cadencePatches.length>0){
+            await patchDoneFields(cadencePatches);
+            setDone(prev=>prev.map(r=>{
+              const patch=cadencePatches.find(p=>p.id===r.id);
+              if(!patch) return r;
+              return { ...r, cadence:patch.cadence, elevation:r.elevation??patch.elevation, max_hr:r.max_hr??patch.max_hr, suffer_score:r.suffer_score??patch.suffer_score };
+            }));
           }
         } catch(e){ /* silencieux */ }
       }
@@ -590,6 +602,7 @@ export default function App() {
           done={done}
           currentVMA={planConfig.vma}
           onClose={() => setShowVMA(false)}
+          onUpdateVMA={(vma) => { handleSettingsUpdate({ vma }); setShowVMA(false); }}
         />
       )}
 

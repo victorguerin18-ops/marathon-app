@@ -77,6 +77,18 @@ export async function deleteDone(id) {
   const { error } = await supabase.from('done').delete().eq('id', id);
   if (error) console.error(error);
 }
+export async function patchDoneFields(patches) {
+  // patches: [{ id, cadence, elevation?, max_hr?, suffer_score? }]
+  // Targeted UPDATE — only sets the listed fields, everything else untouched
+  await Promise.all(patches.map(p => {
+    const fields = { cadence: p.cadence ?? null };
+    if (p.elevation    != null) fields.elevation    = p.elevation;
+    if (p.max_hr       != null) fields.max_hr       = p.max_hr;
+    if (p.suffer_score != null) fields.suffer_score = p.suffer_score;
+    return supabase.from('done').update(fields).eq('id', p.id)
+      .then(({ error }) => { if (error) console.error(error); });
+  }));
+}
 /* ─── CHECKINS ─── */
 export async function loadCheckin(date) {
   const { data, error } = await supabase.from('checkins').select('*').eq('date', date).maybeSingle();

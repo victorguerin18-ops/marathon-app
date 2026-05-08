@@ -1,13 +1,17 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { computeVMA } from '../../utils/scores';
 
-export default function VMAModal({ done, currentVMA, onClose }) {
+export default function VMAModal({ done, currentVMA, onClose, onUpdateVMA }) {
   const result = useMemo(() => computeVMA(done), [done]);
   const finalVMA = result?.finalVMA ?? currentVMA;
   const diff = (finalVMA - currentVMA).toFixed(2);
   const diffPositive = finalVMA > currentVMA;
   const isFromTest  = result?.source === "test";
   const isFromSeuil = result?.source === "seuil";
+
+  const [manualVMA, setManualVMA] = useState(String(currentVMA));
+  const manualVal = parseFloat(manualVMA);
+  const manualValid = manualVal > 10 && manualVal < 25;
 
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(10px)"}}>
@@ -79,13 +83,39 @@ export default function VMAModal({ done, currentVMA, onClose }) {
         </div>
 
         {result && Math.abs(+diff) >= 0.2 && (
-          <div style={{padding:"14px 16px",background:diffPositive?"#32D74B11":"#FF9F0A11",borderRadius:12,fontSize:11,color:diffPositive?"#32D74B":"#FF9F0A",fontFamily:"'Inter',sans-serif",lineHeight:1.7}}>
+          <div style={{padding:"14px 16px",background:diffPositive?"#32D74B11":"#FF9F0A11",borderRadius:12,fontSize:11,color:diffPositive?"#32D74B":"#FF9F0A",fontFamily:"'Inter',sans-serif",lineHeight:1.7,marginBottom:16}}>
             {diffPositive
-              ? `✓ VMA calculée (${finalVMA} km/h) > config (${currentVMA} km/h). Recalibre dans les réglages !`
+              ? `✓ VMA calculée (${finalVMA} km/h) > config (${currentVMA} km/h). Recalibre ci-dessous !`
               : `△ VMA calculée (${finalVMA} km/h) < config (${currentVMA} km/h). Allures cibles peut-être trop ambitieuses.`
             }
           </div>
         )}
+
+        <div style={{padding:"14px 16px",background:"#1a1a1c",borderRadius:12,border:"1px solid #333"}}>
+          <div style={{fontSize:11,color:"#555",fontWeight:500,fontFamily:"'Inter',sans-serif",marginBottom:12}}>SAISIE MANUELLE</div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <input
+              type="number"
+              step="0.1"
+              min="10"
+              max="25"
+              value={manualVMA}
+              onChange={e=>setManualVMA(e.target.value)}
+              placeholder="ex: 16.5"
+              style={{flex:1,background:"#2C2C2E",border:"none",color:"#fff",borderRadius:10,padding:"10px 12px",fontSize:14,fontFamily:"'Inter',sans-serif",outline:"none",fontWeight:700}}
+            />
+            <button
+              onClick={()=>{ if(manualValid) onUpdateVMA(Math.round(manualVal*100)/100); }}
+              disabled={!manualValid}
+              style={{background:manualValid?"#fff":"#333",color:manualValid?"#000":"#555",border:"none",borderRadius:50,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:manualValid?"pointer":"not-allowed",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap",transition:"all .2s"}}
+            >
+              ENREGISTRER
+            </button>
+          </div>
+          <div style={{fontSize:10,color:"#444",fontFamily:"'Inter',sans-serif",marginTop:8}}>
+            Remplace la valeur en config · entre 10 et 25 km/h
+          </div>
+        </div>
       </div>
     </div>
   );

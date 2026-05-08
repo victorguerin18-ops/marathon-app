@@ -51,7 +51,13 @@ export default function JournalView({
                 </div>
                 <span className="pill" style={{background:tm.dark,color:tm.color}}>{tm.icon} {r.type}</span>
                 <div style={{display:"flex",gap:12,marginTop:6,flexWrap:"wrap"}}>
-                  {[`${r.dist} km`,`${r.dur} min`,pace(r.dist,r.dur)+"/km",r.hr?`${r.hr} bpm`:""].filter(Boolean).map(v=>(
+                  {[
+                    `${r.dist} km`,
+                    `${r.dur} min`,
+                    pace(r.dist,r.dur)+"/km",
+                    r.hr ? `${r.hr} bpm` : null,
+                    r.cadence ? `${Math.round(r.cadence)} spm` : null,
+                  ].filter(Boolean).map(v=>(
                     <span key={v} style={{fontSize:11,color:"#888",fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
                   ))}
                 </div>
