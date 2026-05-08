@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { stravaLogin, exchangeToken, fetchActivities, getValidToken } from './strava';
-import { syncToGitHub } from './sync';
+import { syncToGitHub, generateClaudePrompt } from './sync';
 import { loadPlanned, loadDone, savePlanned, saveDone, saveManyDone, deletePlanned, deleteDone, loadCheckin, saveCheckin, loadRecentCheckins } from './db';
 import { PlanWizard, generatePlanFromConfig, defaultConfig } from './PlanWizard';
 import { VMA_DEFAULT, STORE, TODAY_STR, TYPE_META, FEELINGS } from './constants';
@@ -50,6 +50,7 @@ export default function App() {
   const [readinessAction, setReadinessAction] = useState(()=>STORE.get('readiness_action_'+TODAY_STR, null));
   const [githubSyncing,   setGithubSyncing]   = useState(false);
   const [githubSyncMsg,   setGithubSyncMsg]   = useState("");
+  const [clipStatus,      setClipStatus]      = useState("");
 
   const [planForm, setPlanForm] = useState({date:TODAY_STR,type:"Endurance fondamentale",targetDist:"",targetDur:"",targetHR:"",notes:""});
   const [logForm,  setLogForm]  = useState({date:TODAY_STR,plannedId:"",type:"Endurance fondamentale",dist:"",dur:"",hr:"",rpe:"6",feeling:"3",notes:""});
@@ -123,6 +124,17 @@ export default function App() {
       plannedId:          existing.plannedId || autoPlannedId,
       description_strava: existing.description_strava || incoming.description_strava,
     };
+  }
+
+  async function handleClaudeClip() {
+    const text = generateClaudePrompt({ done, planned, checkIn, recentCheckins, planConfig, protectionScore });
+    try {
+      await navigator.clipboard.writeText(text);
+      setClipStatus("✓ Copié !");
+    } catch {
+      setClipStatus("✗ Erreur");
+    }
+    setTimeout(() => setClipStatus(""), 3000);
   }
 
   async function handleGithubSync() {
@@ -476,9 +488,15 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── SYNC COACH BUTTON ── */}
+      {/* ── BOUTONS COACH ── */}
       {view === "today" && (
-        <div style={{padding:"8px 20px 0",display:"flex",justifyContent:"flex-end"}}>
+        <div style={{padding:"8px 20px 0",display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button
+            className="btn-ghost"
+            onClick={handleClaudeClip}
+            style={{display:"flex",alignItems:"center",gap:5}}>
+            {clipStatus || "📋 Claude"}
+          </button>
           <button
             className="btn-ghost"
             onClick={handleGithubSync}
@@ -486,7 +504,7 @@ export default function App() {
             style={{opacity:githubSyncing?0.6:1,display:"flex",alignItems:"center",gap:6}}>
             {githubSyncing
               ? <><span className="spin">↻</span> Sync...</>
-              : githubSyncMsg || "⟳ Sync Coach"}
+              : githubSyncMsg || "⟳ GitHub"}
           </button>
         </div>
       )}
