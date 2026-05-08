@@ -784,8 +784,14 @@ export default function App() {
               <FormGrid>
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" placeholder="145" value={logForm.hr} onChange={e=>setLogForm({...logForm,hr:e.target.value})}/></Field>
                 <Field label={`RPE · ${logForm.rpe}/10`} full>
-                  <input type="range" min="1" max="10" value={logForm.rpe} onChange={e=>setLogForm({...logForm,rpe:e.target.value})} style={{width:"100%",accentColor:"#FFE66D"}}/>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#444",fontFamily:"'Inter',sans-serif",marginTop:4}}><span>LÉGER</span><span>MODÉRÉ</span><span>MAX</span></div>
+                  <div style={{display:"flex",gap:4,marginTop:4}}>
+                    {Array.from({length:10},(_,i)=>i+1).map(n=>(
+                      <button key={n} onClick={()=>setLogForm({...logForm,rpe:String(n)})}
+                        style={{flex:1,padding:"9px 0",background:+logForm.rpe===n?"#FFE66D":"#333",color:+logForm.rpe===n?"#000":"#555",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
                 <Field label="RESSENTI" full>
                   <div style={{display:"flex",gap:8,justifyContent:"center"}}>
@@ -823,8 +829,15 @@ export default function App() {
                 <Field label="FC MOY (bpm)"><input type="number" className="inp" value={editForm.hr||""} onChange={e=>setEditForm({...editForm,hr:e.target.value})}/></Field>
                 <Field label="CADENCE (spm)"><input type="number" className="inp" placeholder="172" value={editForm.cadence||""} onChange={e=>setEditForm({...editForm,cadence:e.target.value})}/></Field>
                 <Field label="DÉNIVELÉ (m)"><input type="number" className="inp" placeholder="120" value={editForm.elevation||""} onChange={e=>setEditForm({...editForm,elevation:e.target.value})}/></Field>
-                <Field label={`RPE · ${editForm.rpe}/10`}>
-                  <input type="range" min="1" max="10" value={editForm.rpe} onChange={e=>setEditForm({...editForm,rpe:e.target.value})} style={{width:"100%",accentColor:"#FFE66D",marginTop:8}}/>
+                <Field label={`RPE · ${editForm.rpe}/10`} full>
+                  <div style={{display:"flex",gap:4,marginTop:4}}>
+                    {Array.from({length:10},(_,i)=>i+1).map(n=>(
+                      <button key={n} onClick={()=>setEditForm({...editForm,rpe:String(n)})}
+                        style={{flex:1,padding:"9px 0",background:+editForm.rpe===n?"#FFE66D":"#333",color:+editForm.rpe===n?"#000":"#555",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
                 <Field label="RESSENTI" full>
                   <div style={{display:"flex",gap:8,justifyContent:"center"}}>

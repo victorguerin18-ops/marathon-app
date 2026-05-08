@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { TYPE_META, TODAY_STR, PERIODS, VARIETY_PERIODS, METRICS } from '../constants';
 import { addDays, wkKey, parseDate, fmtDate } from '../utils/dates';
+import { getACWRStatus } from '../utils/scores';
 import Chart from '../components/Chart';
 
 export default function AnalyseView({ done }) {
@@ -19,7 +20,7 @@ export default function AnalyseView({ done }) {
   );
   const chronicLoadMain = weeks4Main.reduce((s, v) => s + v, 0) / 4;
   const acwr = chronicLoadMain > 0 ? acuteLoadMain / chronicLoadMain : 1;
-  const acwrStatus = acwr>1.3?{label:"RISQUE ÉLEVÉ",color:"#FF453A"}:acwr>1.15?{label:"CHARGE MODÉRÉE",color:"#FF9F0A"}:{label:"OPTIMAL",color:"#32D74B"};
+  const acwrStatus = getACWRStatus(acwr);
 
   const selVolMetric = METRICS.find(m=>m.key===volMetric);
 

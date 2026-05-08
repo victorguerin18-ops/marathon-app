@@ -30,11 +30,13 @@ export default function StravaDebriefModal({ stravaDebriefModal, debriefForm, se
 
         <div style={{marginBottom:16}}>
           <div style={{fontSize:11,color:"#555",fontWeight:500,fontFamily:"'Inter',sans-serif",marginBottom:8}}>EFFORT PERÇU · {debriefForm.rpe}/10</div>
-          <input type="range" min="1" max="10" value={debriefForm.rpe}
-            onChange={e=>setDebriefForm(f=>({...f,rpe:e.target.value}))}
-            style={{width:"100%",accentColor:"#FFE66D"}}/>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#555",fontFamily:"'Inter',sans-serif",marginTop:4}}>
-            <span>LÉGER</span><span>MODÉRÉ</span><span>MAX</span>
+          <div style={{display:"flex",gap:4}}>
+            {Array.from({length:10},(_,i)=>i+1).map(n=>(
+              <button key={n} onClick={()=>setDebriefForm(f=>({...f,rpe:String(n)}))}
+                style={{flex:1,padding:"9px 0",background:+debriefForm.rpe===n?"#FFE66D":"#333",color:+debriefForm.rpe===n?"#000":"#555",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
+                {n}
+              </button>
+            ))}
           </div>
         </div>
 

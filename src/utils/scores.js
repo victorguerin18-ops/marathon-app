@@ -58,9 +58,23 @@ export function computeVMA(doneList) {
   return null;
 }
 
+export function getACWRStatus(acwr) {
+  if (acwr > 1.3)  return { label: "RISQUE ÉLEVÉ",   color: "#FF453A" };
+  if (acwr > 1.15) return { label: "CHARGE MODÉRÉE", color: "#FF9F0A" };
+  if (acwr < 0.8)  return { label: "SOUS-CHARGE",    color: "#FF9F0A" };
+  return               { label: "OPTIMAL",        color: "#32D74B" };
+}
+
 export function computeProtectionScore({ done, readiness, weeklyVol }) {
   const signals = [];
   const HARD = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
+  const hasReadiness = readiness != null;
+
+  // Weights: if no check-in today, readiness is excluded entirely so training
+  // load signals carry the full score rather than a fabricated 65/100 default.
+  const W = hasReadiness
+    ? { ACWR: 0.40, VOL: 0.10, MONO: 0.10, READY: 0.40 }
+    : { ACWR: 0.60, VOL: 0.20, MONO: 0.20, READY: 0    };
 
   const acuteLoad = done
     .filter(r => r.date >= addDays(TODAY_STR, -7))
@@ -76,7 +90,7 @@ export function computeProtectionScore({ done, readiness, weeklyVol }) {
   else if (acwr <= 1.3) acwrScore = 100;
   else if (acwr <= 1.5) acwrScore = Math.round(100 - ((acwr - 1.3) / 0.2) * 60);
   else                  acwrScore = Math.max(0, Math.round(40 - (acwr - 1.5) * 80));
-  signals.push({ key:"ACWR", label:"Charge aiguë/chronique", score:acwrScore, weight:0.35, value:acwr.toFixed(2), optimal:"0.8–1.3" });
+  signals.push({ key:"ACWR", label:"Charge aiguë/chronique", score:acwrScore, weight:W.ACWR, value:acwr.toFixed(2), optimal:"0.8–1.3" });
 
   const curKm  = weeklyVol[0]?.dist || 0;
   const prevKm = weeklyVol[1]?.dist || 0;
@@ -84,7 +98,7 @@ export function computeProtectionScore({ done, readiness, weeklyVol }) {
   let volScore = 100;
   if (volPct > 20)      volScore = Math.max(0, Math.round(100 - (volPct - 20) * 3));
   else if (volPct > 10) volScore = Math.round(100 - (volPct - 10) * 2);
-  signals.push({ key:"VOL", label:"Progression volume", score:volScore, weight:0.10, value:`${volPct > 0 ? "+" : ""}${Math.round(volPct)}%`, optimal:"≤+10%/sem" });
+  signals.push({ key:"VOL", label:"Progression volume", score:volScore, weight:W.VOL, value:`${volPct > 0 ? "+" : ""}${Math.round(volPct)}%`, optimal:"≤+10%/sem" });
 
   const last14 = done.filter(r => r.date >= addDays(TODAY_STR, -14));
   let monoScore = 100, monoLabel = "variée", monoDetail = "";
@@ -102,16 +116,19 @@ export function computeProtectionScore({ done, readiness, weeklyVol }) {
     }
     monoDetail = `${hardPct}% intensif · ${100-hardPct}% facile sur 14j`;
   }
-  signals.push({ key:"MONO", label:"Monotonie", score:monoScore, weight:0.10, value:monoLabel, detail:monoDetail, optimal:"variée (30-40% intensif)" });
+  signals.push({ key:"MONO", label:"Monotonie", score:monoScore, weight:W.MONO, value:monoLabel, detail:monoDetail, optimal:"variée (30-40% intensif)" });
 
-  const readinessScore = readiness ?? 65;
-  signals.push({ key:"READY", label:"Readiness (VFC + récup)", score:readinessScore, weight:0.45, value:readiness ? `${readiness}/100` : "—", optimal:"≥75" });
+  if (hasReadiness) {
+    signals.push({ key:"READY", label:"Readiness (VFC + récup)", score:readiness, weight:W.READY, value:`${readiness}/100`, optimal:"≥75" });
+  } else {
+    signals.push({ key:"READY", label:"Readiness (VFC + récup)", score:null, weight:0, value:"—", optimal:"≥75", missing:true });
+  }
 
-  const total = Math.round(signals.reduce((s, sig) => s + sig.score * sig.weight, 0));
+  const total = Math.round(signals.reduce((s, sig) => s + (sig.score ?? 0) * sig.weight, 0));
   const level = total >= 75 ? { label:"BIEN PROTÉGÉ", color:"#4ECDC4", bg:"#0d2b28", icon:"🛡️" }
               : total >= 50 ? { label:"VIGILANCE",     color:"#FF9F43", bg:"#2b1a00", icon:"⚠️" }
               :               { label:"RISQUE ÉLEVÉ",  color:"#FF6B6B", bg:"#2b0d0d", icon:"🚨" };
-  return { total, signals, level, acwr };
+  return { total, signals, level, acwr, hasReadiness };
 }
 
 export function calcReadiness(bevelRecovery, hrv, restingHR, sleepHours, feelingScore) {
