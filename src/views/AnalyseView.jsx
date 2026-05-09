@@ -7,7 +7,9 @@ import Chart from '../components/Chart';
 export default function AnalyseView({ done }) {
   const [volPeriod,  setVolPeriod]  = useState("4m");
   const [volMetric,  setVolMetric]  = useState("km");
+  const [volSmooth,  setVolSmooth]  = useState(false);
   const [cadPeriod,  setCadPeriod]  = useState("all");
+  const [cadSmooth,  setCadSmooth]  = useState(false);
   const [varPeriod,  setVarPeriod]  = useState("4w");
   const [showACWRDetail, setShowACWRDetail] = useState(false);
 
@@ -96,8 +98,10 @@ export default function AnalyseView({ done }) {
             <button key={p.key} className="seg-btn" onClick={()=>setVolPeriod(p.key)}
               style={{flex:1,background:volPeriod===p.key?"#32D74B":"#333",color:volPeriod===p.key?"#000":"#555",borderRadius:10,fontWeight:volPeriod===p.key?700:500}}>{p.label}</button>
           ))}
+          <button className="seg-btn" onClick={()=>setVolSmooth(s=>!s)}
+            style={{flex:"0 0 auto",padding:"4px 10px",background:volSmooth?"#fff":"#333",color:volSmooth?"#000":"#555",borderRadius:10,fontWeight:volSmooth?700:500,fontSize:13}}>∿</button>
         </div>
-        <Chart data={volumeData} color="#32D74B" formatY={fmtVol} smooth={false}/>
+        <Chart data={volumeData} color="#32D74B" formatY={fmtVol} smooth={volSmooth}/>
         {volumeData.length>0&&(()=>{
           const nz=volumeData.filter(d=>d.value>0);
           const avg=nz.length?Math.round(nz.reduce((s,d)=>s+d.value,0)/nz.length):0;
@@ -167,13 +171,15 @@ export default function AnalyseView({ done }) {
             <button key={p.key} className="seg-btn" onClick={()=>setCadPeriod(p.key)}
               style={{flex:1,background:cadPeriod===p.key?"#0A84FF":"#333",color:cadPeriod===p.key?"#fff":"#555",borderRadius:10,fontWeight:cadPeriod===p.key?700:500}}>{p.label}</button>
           ))}
+          <button className="seg-btn" onClick={()=>setCadSmooth(s=>!s)}
+            style={{flex:"0 0 auto",padding:"4px 10px",background:cadSmooth?"#fff":"#333",color:cadSmooth?"#000":"#555",borderRadius:10,fontWeight:cadSmooth?700:500,fontSize:13}}>∿</button>
         </div>
         {cadenceData.length===0
           ? <div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#555",fontFamily:"'Inter',sans-serif"}}>
               Aucune donnée de cadence · saisis-la manuellement dans le journal
             </div>
           : <>
-              <Chart data={cadenceData} color="#0A84FF" formatY={v=>`${v}`} smooth={false}
+              <Chart data={cadenceData} color="#0A84FF" formatY={v=>`${v}`} smooth={cadSmooth}
                 minVal={Math.max(130, Math.min(...cadenceData.map(d=>d.value))-10)}/>
               {cadenceData.length>=1&&(()=>{
                 const vals=cadenceData.map(d=>d.value);
