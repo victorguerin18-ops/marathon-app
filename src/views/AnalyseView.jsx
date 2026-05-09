@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { TYPE_META, TODAY_STR, PERIODS, VARIETY_PERIODS, METRICS } from '../constants';
+import { TYPE_META, TODAY_STR, PERIODS, VARIETY_PERIODS, METRICS, INTENSE_TYPES } from '../constants';
 import { addDays, wkKey, parseDate, fmtDate } from '../utils/dates';
 import { getACWRStatus } from '../utils/scores';
 import Chart from '../components/Chart';
@@ -225,6 +225,46 @@ export default function AnalyseView({ done }) {
               style={{flex:1,background:varPeriod===p.key?"#BF5AF2":"#333",color:varPeriod===p.key?"#fff":"#555",borderRadius:10,fontWeight:varPeriod===p.key?700:500}}>{p.label}</button>
           ))}
         </div>
+        {(()=>{
+          const totalRuns = Object.values(varietyData).reduce((s,v)=>s+v.runs,0);
+          const hardRuns  = Object.entries(varietyData).filter(([t])=>INTENSE_TYPES.includes(t)).reduce((s,[,v])=>s+v.runs,0);
+          const hardPct   = totalRuns>0 ? Math.round(hardRuns/totalRuns*100) : 0;
+          const easyPct   = 100-hardPct;
+          const inZone    = hardPct>=15&&hardPct<=25;
+          const col       = inZone?"#32D74B":hardPct>25?"#FF453A":"#FF9F0A";
+          return (
+            <div style={{marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontSize:10,color:"#555",fontFamily:"'Inter',sans-serif",fontWeight:600,letterSpacing:0.5}}>RÈGLE 80/20</span>
+                <span style={{fontSize:11,fontWeight:700,color:col,fontFamily:"'JetBrains Mono',monospace"}}>{easyPct}% facile · {hardPct}% intensif</span>
+              </div>
+              <div style={{height:10,background:"#2a2a2c",borderRadius:5,position:"relative",overflow:"visible"}}>
+                {/* zone cible verte : de 75% à 85% du bord gauche (= 15-25% hard depuis la droite) */}
+                <div style={{position:"absolute",left:"75%",width:"10%",height:"100%",background:"#32D74B22",borderRadius:2,pointerEvents:"none"}}/>
+                {/* barre facile */}
+                <div style={{position:"absolute",left:0,width:`${easyPct}%`,height:"100%",background:"#444",borderRadius:"5px 0 0 5px"}}/>
+                {/* barre intensif */}
+                <div style={{position:"absolute",left:`${easyPct}%`,right:0,height:"100%",background:col,opacity:0.85,borderRadius:"0 5px 5px 0"}}/>
+                {/* marqueur cible 80% */}
+                <div style={{position:"absolute",left:"80%",top:-3,width:2,height:16,background:"#32D74B",borderRadius:1}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#555",fontFamily:"'Inter',sans-serif",marginTop:4}}>
+                <span>← FACILE</span>
+                <span style={{color:"#32D74B"}}>cible 80 %</span>
+                <span>INTENSIF →</span>
+              </div>
+              <div style={{marginTop:8,padding:"8px 10px",background:"#333",borderRadius:8,fontSize:11,fontFamily:"'Inter',sans-serif",color:col}}>
+                {inZone
+                  ? "✓ Distribution idéale — règle 80/20 respectée"
+                  : hardPct>25
+                  ? `⚠ Trop d'intensité (${hardPct}%) — risque de surentraînement, ajoute des EF`
+                  : hardPct===0
+                  ? "△ Aucune séance intensive — ajoute un fractionné ou tempo"
+                  : `△ Peu d'intensité (${hardPct}%) — vise 1–2 séances intenses par semaine`}
+              </div>
+            </div>
+          );
+        })()}
         {Object.entries(varietyData).sort((a,b)=>b[1].runs-a[1].runs).map(([type,data])=>{
           const tm=TYPE_META[type]||TYPE_META["Footing"];
           const total=Object.values(varietyData).reduce((s,v)=>s+v.runs,0);

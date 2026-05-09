@@ -67,7 +67,6 @@ export function getACWRStatus(acwr) {
 
 export function computeProtectionScore({ done, readiness, weeklyVol }) {
   const signals = [];
-  const HARD = ["Fractionné / VMA", "Tempo / Seuil", "Évaluation VMA"];
   const hasReadiness = readiness != null;
 
   // Weights: if no check-in today, readiness is excluded entirely so training
@@ -101,22 +100,42 @@ export function computeProtectionScore({ done, readiness, weeklyVol }) {
   signals.push({ key:"VOL", label:"Progression volume", score:volScore, weight:W.VOL, value:`${volPct > 0 ? "+" : ""}${Math.round(volPct)}%`, optimal:"≤+10%/sem" });
 
   const last14 = done.filter(r => r.date >= addDays(TODAY_STR, -14));
-  let monoScore = 100, monoLabel = "variée", monoDetail = "";
-  if (last14.length >= 3) {
-    const nHard = last14.filter(r => HARD.includes(r.type)).length;
-    const nEasy = last14.length - nHard;
-    const dominantPct = Math.max(nHard, nEasy) / last14.length;
-    const hardPct = Math.round((nHard / last14.length) * 100);
-    const easyTypes = new Set(last14.filter(r => !HARD.includes(r.type)).map(r => r.type));
-    if (dominantPct >= 0.85)      { monoScore = 30; monoLabel = "élevée"; }
-    else if (dominantPct >= 0.70) { monoScore = 60; monoLabel = "modérée"; }
-    else {
-      const varietyBonus = easyTypes.size >= 2 ? 10 : 0;
-      monoScore = Math.min(100, 80 + varietyBonus); monoLabel = "variée";
+  let monoScore = 80, monoLabel = "équilibrée", monoDetail = "";
+  if (last14.length >= 2) {
+    const nHard    = last14.filter(r => INTENSE_TYPES.includes(r.type)).length;
+    const hardRatio = nHard / last14.length;
+    const hardPct  = Math.round(hardRatio * 100);
+
+    // Target: 15–25% intense (80/20 rule). Penalise both under- and over-intensity,
+    // but steeper on the over-intensity side (injury risk is asymmetric).
+    if (hardRatio >= 0.15 && hardRatio <= 0.25) {
+      monoScore = 100; monoLabel = "idéale";
+    } else if (hardRatio > 0.25 && hardRatio <= 0.35) {
+      monoScore = Math.round(100 - (hardRatio - 0.25) / 0.10 * 40); // 100→60
+      monoLabel = "chargée";
+    } else if (hardRatio > 0.35) {
+      monoScore = Math.max(0, Math.round(60 - (hardRatio - 0.35) / 0.30 * 60)); // 60→0
+      monoLabel = "trop intensive";
+    } else if (hardRatio >= 0.08) {
+      monoScore = Math.round(60 + (hardRatio - 0.08) / 0.07 * 40); // 60→100
+      monoLabel = "peu stimulante";
+    } else {
+      monoScore = nHard === 0 ? 40 : Math.round(40 + hardRatio / 0.08 * 20);
+      monoLabel = nHard === 0 ? "sans intensité" : "très peu stimulante";
     }
+
+    // Extra penalty: two intense sessions on back-to-back calendar days
+    const sorted14 = [...last14].sort((a, b) => a.date.localeCompare(b.date));
+    for (let i = 1; i < sorted14.length; i++) {
+      if (INTENSE_TYPES.includes(sorted14[i].type) && INTENSE_TYPES.includes(sorted14[i-1].type)) {
+        const diff = (new Date(sorted14[i].date + 'T12:00') - new Date(sorted14[i-1].date + 'T12:00')) / 86400000;
+        if (diff <= 1) { monoScore = Math.max(0, monoScore - 25); monoLabel += " · consécutive"; break; }
+      }
+    }
+
     monoDetail = `${hardPct}% intensif · ${100-hardPct}% facile sur 14j`;
   }
-  signals.push({ key:"MONO", label:"Monotonie", score:monoScore, weight:W.MONO, value:monoLabel, detail:monoDetail, optimal:"variée (30-40% intensif)" });
+  signals.push({ key:"MONO", label:"Répartition 80/20", score:monoScore, weight:W.MONO, value:monoLabel, detail:monoDetail, optimal:"15–25% intensif" });
 
   if (hasReadiness) {
     signals.push({ key:"READY", label:"Readiness (VFC + récup)", score:readiness, weight:W.READY, value:`${readiness}/100`, optimal:"≥75" });
