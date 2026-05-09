@@ -1,3 +1,12 @@
+function movingAvg(values, w) {
+  const half = Math.floor(w / 2);
+  return values.map((_, i) => {
+    const s = Math.max(0, i - half), e = Math.min(values.length - 1, i + half);
+    const sl = values.slice(s, e + 1);
+    return sl.reduce((a, v) => a + v, 0) / sl.length;
+  });
+}
+
 export default function Chart({ data, color, formatY, smooth, minVal: minValProp }) {
   if(!data||data.length<2) return (
     <div style={{fontSize:11,color:"#555",fontFamily:"'Inter',sans-serif",padding:"24px 0",textAlign:"center"}}>
@@ -6,23 +15,29 @@ export default function Chart({ data, color, formatY, smooth, minVal: minValProp
   );
   const W=440,H=150,padL=46,padB=28,padT=16,padR=10;
   const iW=W-padL-padR, iH=H-padT-padB;
-  const maxVal=Math.max(...data.map(d=>d.value),1);
+  const rawValues=data.map(d=>d.value);
+  // Moving average window: ~35% of data, min 3 — gives a trend line that ignores spikes
+  const trendValues=smooth?movingAvg(rawValues,Math.max(3,Math.round(rawValues.length*0.35))):rawValues;
+  const maxVal=Math.max(...rawValues,1);
   const minVal=minValProp??0;
   const range=Math.max(maxVal-minVal,1);
   const toY=v=>padT+(1-(v-minVal)/range)*iH;
-  const pts=data.map((d,i)=>({x:padL+(i/(data.length-1))*iW, y:toY(d.value),...d}));
-  function crPath(){
-    let p=`M ${pts[0].x} ${pts[0].y}`;
-    for(let i=0;i<pts.length-1;i++){
-      const p0=pts[Math.max(i-1,0)],p1=pts[i],p2=pts[i+1],p3=pts[Math.min(i+2,pts.length-1)];
+  // Line/area use trend values; dots stay at original positions
+  const linePts=trendValues.map((v,i)=>({x:padL+(i/(data.length-1))*iW,y:toY(v)}));
+  const pts=rawValues.map((v,i)=>({x:padL+(i/(data.length-1))*iW,y:toY(v),...data[i]}));
+  function crPath(p_arr){
+    let p=`M ${p_arr[0].x} ${p_arr[0].y}`;
+    for(let i=0;i<p_arr.length-1;i++){
+      const p0=p_arr[Math.max(i-1,0)],p1=p_arr[i],p2=p_arr[i+1],p3=p_arr[Math.min(i+2,p_arr.length-1)];
       p+=` C ${p1.x+(p2.x-p0.x)/6} ${p1.y+(p2.y-p0.y)/6}, ${p2.x-(p3.x-p1.x)/6} ${p2.y-(p3.y-p1.y)/6}, ${p2.x} ${p2.y}`;
     }
     return p;
   }
-  function polyPath(){return pts.map((p,i)=>`${i===0?'M':'L'} ${p.x} ${p.y}`).join(' ');}
-  const linePath=smooth?crPath():polyPath();
+  function polyPath(p_arr){return p_arr.map((p,i)=>`${i===0?'M':'L'} ${p.x} ${p.y}`).join(' ');}
+  // Trend line always uses Catmull-Rom for a fluid curve
+  const linePath=smooth?crPath(linePts):polyPath(linePts);
   const base=padT+iH;
-  const area=linePath+` L ${pts[pts.length-1].x} ${base} L ${pts[0].x} ${base} Z`;
+  const area=linePath+` L ${linePts[linePts.length-1].x} ${base} L ${linePts[0].x} ${base} Z`;
   const ticks=[0,.25,.5,.75,1].map(t=>({y:padT+(1-t)*iH,val:Math.round(minVal+t*range)}));
   const step=Math.max(1,Math.floor(data.length/5));
   const xLbls=data.map((d,i)=>({...d,i})).filter(({i})=>i%step===0||i===data.length-1);
