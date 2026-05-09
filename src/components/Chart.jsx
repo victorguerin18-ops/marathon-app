@@ -1,4 +1,4 @@
-export default function Chart({ data, color, formatY, smooth }) {
+export default function Chart({ data, color, formatY, smooth, minVal: minValProp }) {
   if(!data||data.length<2) return (
     <div style={{fontSize:11,color:"#555",fontFamily:"'Inter',sans-serif",padding:"24px 0",textAlign:"center"}}>
       Pas assez de données
@@ -7,7 +7,10 @@ export default function Chart({ data, color, formatY, smooth }) {
   const W=440,H=150,padL=46,padB=28,padT=16,padR=10;
   const iW=W-padL-padR, iH=H-padT-padB;
   const maxVal=Math.max(...data.map(d=>d.value),1);
-  const pts=data.map((d,i)=>({x:padL+(i/(data.length-1))*iW, y:padT+(1-d.value/maxVal)*iH,...d}));
+  const minVal=minValProp??0;
+  const range=Math.max(maxVal-minVal,1);
+  const toY=v=>padT+(1-(v-minVal)/range)*iH;
+  const pts=data.map((d,i)=>({x:padL+(i/(data.length-1))*iW, y:toY(d.value),...d}));
   function crPath(){
     let p=`M ${pts[0].x} ${pts[0].y}`;
     for(let i=0;i<pts.length-1;i++){
@@ -20,7 +23,7 @@ export default function Chart({ data, color, formatY, smooth }) {
   const linePath=smooth?crPath():polyPath();
   const base=padT+iH;
   const area=linePath+` L ${pts[pts.length-1].x} ${base} L ${pts[0].x} ${base} Z`;
-  const ticks=[0,.25,.5,.75,1].map(t=>({y:padT+(1-t)*iH,val:Math.round(t*maxVal)}));
+  const ticks=[0,.25,.5,.75,1].map(t=>({y:padT+(1-t)*iH,val:Math.round(minVal+t*range)}));
   const step=Math.max(1,Math.floor(data.length/5));
   const xLbls=data.map((d,i)=>({...d,i})).filter(({i})=>i%step===0||i===data.length-1);
   const last=pts[pts.length-1];

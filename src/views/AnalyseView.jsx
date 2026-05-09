@@ -173,7 +173,8 @@ export default function AnalyseView({ done }) {
               Aucune donnée de cadence · saisis-la manuellement dans le journal
             </div>
           : <>
-              <Chart data={cadenceData} color="#0A84FF" formatY={v=>`${v}`} smooth={false}/>
+              <Chart data={cadenceData} color="#0A84FF" formatY={v=>`${v}`} smooth={false}
+                minVal={Math.max(130, Math.min(...cadenceData.map(d=>d.value))-10)}/>
               {cadenceData.length>=1&&(()=>{
                 const vals=cadenceData.map(d=>d.value);
                 const avg=Math.round(vals.reduce((s,v)=>s+v,0)/vals.length);
